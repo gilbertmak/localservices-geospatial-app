@@ -31,12 +31,13 @@ Demo credentials:
 ## User flow
 
 1. Sign in from the sidebar.
-2. In **Create new POI**, select Bangkok, Johor Bahru, or Singapore.
-3. Review the Southeast Asia map and upload a `.csv`, `.xlsx`, or `.xls` file.
-4. Include these required columns: `location name`, `latitude`, and `longitude`.
-5. Review the validated POIs and the derived service-area shape.
-6. Request synchronization to the separate simulated POI and service-area databases.
-7. In **Update POI**, use the service-area database dropdown to download the current POI snapshot or expand the re-upload workflow.
+2. In **Create new Service Area/POI**, select Bangkok, Johor Bahru, Singapore, or **(create new service area)**.
+3. If creating a new service area, enter a unique service-area name.
+4. Review the Southeast Asia map and upload a `.csv`, `.xlsx`, or `.xls` file.
+5. Include these required columns: `location name`, `latitude`, and `longitude`.
+6. Review the validated POIs and the derived service-area shape.
+7. Request synchronization to the separate simulated POI and service-area databases.
+8. In **Update POI**, use the service-area database dropdown to download the current POI snapshot or expand the re-upload workflow.
 
 ## Demo boundary
 
@@ -49,9 +50,10 @@ projects it to a local UTM CRS, buffers it by 1,000 metres, and stores the resul
 geometry separately from the POI rows. The most north, east, south, and west POIs remain available
 as audit details, but no POI is excluded from the service-area hull.
 
-The footer uses Streamlit's sticky `st.bottom` layout container. The scroll-to-bottom balloon
-easter egg uses a trusted `st.components.v2.component` with `isolate_styles=False`; it is a
-client-side animation and does not call a production backend.
+The footer uses Streamlit's sticky `st.bottom` layout container.
+
+The planned movable-POI interaction is documented in
+[`subagent decisions/movable-poi-map-plan.md`](subagent%20decisions/movable-poi-map-plan.md).
 
 ## Validation
 

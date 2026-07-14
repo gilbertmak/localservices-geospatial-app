@@ -24,6 +24,8 @@ SUPPORTED_EXTENSIONS = ["csv", "xlsx", "xls"]
 WGS84_CRS = "EPSG:4326"
 SERVICE_AREA_BUFFER_METERS = 1_000
 POI_MARKER_RADIUS_METERS = 150 * 0.25
+DEFAULT_MAP_CENTER = (1.3521, 103.8198)
+CREATE_NEW_SERVICE_AREA_OPTION = "(create new service area)"
 
 SERVICE_AREAS: dict[str, dict[str, Any]] = {
     "Singapore": {
@@ -239,6 +241,26 @@ def service_area_names() -> list[str]:
     return list(st.session_state.service_area_database)
 
 
+def validate_new_service_area_name(
+    name: str,
+    existing_names: list[str],
+) -> str | None:
+    """Return a user-facing validation error for a new service-area name."""
+
+    normalized_name = name.strip()
+    if not normalized_name:
+        return "Enter a name for the new service area."
+    if any(
+        existing_name.casefold() == normalized_name.casefold()
+        for existing_name in existing_names
+    ):
+        return (
+            "That service area already exists. Enter a different name or choose it "
+            "from the dropdown."
+        )
+    return None
+
+
 def render_sidebar() -> None:
     """Render the login surface and demo connection status."""
 
@@ -285,7 +307,9 @@ def render_map(
     """Render a Streamlit map with a Southeast Asia or service-area default view."""
 
     if dataframe is None or dataframe.empty:
-        latitude, longitude = SERVICE_AREAS[area_name]["center"]
+        latitude, longitude = SERVICE_AREAS.get(
+            area_name, {"center": DEFAULT_MAP_CENTER}
+        )["center"]
         map_dataframe = pd.DataFrame(
             [{"location_name": empty_label, "latitude": latitude, "longitude": longitude}]
         )
@@ -407,12 +431,30 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
     """Render the reusable create/re-upload POI workflow."""
 
     st.subheader(heading)
-    area_name = st.selectbox(
+    area_options = service_area_names()
+    allow_new_service_area = key_prefix == "create_upload"
+    if allow_new_service_area:
+        area_options = [*area_options, CREATE_NEW_SERVICE_AREA_OPTION]
+
+    selected_area = st.selectbox(
         "Service area",
-        service_area_names(),
+        area_options,
         key=f"{key_prefix}_area",
         help="Choose where the uploaded POI data belongs.",
     )
+    area_name = selected_area
+    area_name_error: str | None = None
+    if allow_new_service_area and selected_area == CREATE_NEW_SERVICE_AREA_OPTION:
+        new_area_name = st.text_input(
+            "New service area name",
+            key=f"{key_prefix}_new_area_name",
+            placeholder="e.g. Punggol",
+            help="Enter a unique name for the new service area.",
+        ).strip()
+        area_name = new_area_name
+        area_name_error = validate_new_service_area_name(
+            new_area_name, service_area_names()
+        )
 
     map_container = st.container()
     uploaded_file = st.file_uploader(
@@ -427,7 +469,7 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
         st.caption("Map preview · default view: Southeast Asia")
         render_map(
             dataframe,
-            area_name,
+            area_name or selected_area,
             zoom=4,
             empty_label="Southeast Asia preview",
         )
@@ -435,6 +477,10 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
     if error:
         st.error(f"Upload could not be validated: {error}")
         st.info("Required columns: location name, latitude, longitude.")
+        return
+
+    if area_name_error:
+        st.error(area_name_error)
         return
 
     if dataframe is None:
@@ -512,90 +558,6 @@ def render_update_tab() -> None:
         render_upload_workflow("update_upload", "Replace POI records")
 
 
-@st.cache_resource(show_spinner=False)
-def _get_scroll_easter_egg_component() -> Any:
-    """Register the custom component once for the lifetime of the Streamlit process."""
-
-    return st.components.v2.component(
-        "lsge_scroll_easter_egg",
-        html="<div aria-hidden='true'></div>",
-        css="""
-          .lsge-balloon-overlay {
-            position: fixed;
-            inset: 0;
-            z-index: 999999;
-            pointer-events: none;
-            overflow: hidden;
-          }
-          .lsge-balloon {
-            position: absolute;
-            bottom: -90px;
-            width: 24px;
-            height: 32px;
-            border-radius: 50% 50% 45% 45%;
-            box-shadow: inset -5px -4px 0 rgba(0,0,0,.12);
-            animation: lsge-float 4.8s ease-in forwards;
-          }
-          .lsge-balloon::after {
-            content: "";
-            position: absolute;
-            left: 50%;
-            top: 30px;
-            width: 1px;
-            height: 52px;
-            background: rgba(15,23,42,.35);
-          }
-          @keyframes lsge-float {
-            0% { transform: translate3d(0, 0, 0) rotate(-6deg); opacity: 0; }
-            12% { opacity: 1; }
-            100% { transform: translate3d(0, -115vh, 0) rotate(10deg); opacity: 0; }
-          }
-        """,
-        js="""
-        export default function(component) {
-          const scrollTarget = document.querySelector('[data-testid="stMain"]') || window;
-          const celebrate = () => {
-            const viewportHeight = scrollTarget === window ? window.innerHeight : scrollTarget.clientHeight;
-            const scrollPosition = scrollTarget === window ? window.scrollY : scrollTarget.scrollTop;
-            const contentHeight = scrollTarget === window ? document.documentElement.scrollHeight : scrollTarget.scrollHeight;
-            const nearBottom = viewportHeight + scrollPosition >= contentHeight - 72;
-            if (!nearBottom || window.__lsgeScrollEggTriggered) return;
-            window.__lsgeScrollEggTriggered = true;
-            const overlay = document.createElement("div");
-            overlay.className = "lsge-balloon-overlay";
-            const colors = ["#0f766e", "#f97316", "#2563eb", "#eab308", "#db2777"];
-            for (let index = 0; index < 20; index += 1) {
-              const balloon = document.createElement("span");
-              balloon.className = "lsge-balloon";
-              balloon.style.left = `${(index * 47) % 101}%`;
-              balloon.style.background = colors[index % colors.length];
-              balloon.style.animationDelay = `${(index % 7) * 0.12}s`;
-              overlay.appendChild(balloon);
-            }
-            document.body.appendChild(overlay);
-            window.setTimeout(() => overlay.remove(), 5600);
-          };
-
-          window.__lsgeScrollEggTriggered = false;
-          scrollTarget.addEventListener("scroll", celebrate, { passive: true });
-          window.addEventListener("resize", celebrate);
-          return () => {
-            scrollTarget.removeEventListener("scroll", celebrate);
-            window.removeEventListener("resize", celebrate);
-          };
-        }
-        """,
-        isolate_styles=False,
-    )
-
-
-def render_scroll_easter_egg() -> None:
-    """Add a trusted, client-side balloon animation when the user reaches the footer."""
-
-    component = _get_scroll_easter_egg_component()
-    component(key="lsge_scroll_easter_egg_instance")
-
-
 def render_footer() -> None:
     """Render the sticky footer required by the product brief."""
 
@@ -651,13 +613,12 @@ def main() -> None:
         )
         st.caption(f"Signed in as {st.session_state.username} · Backend: simulated")
 
-        create_tab, update_tab = st.tabs(["Create new POI", "Update POI"])
+        create_tab, update_tab = st.tabs(["Create new Service Area/POI", "Update POI"])
         with create_tab:
-            render_upload_workflow("create_upload", "Create new POI")
+            render_upload_workflow("create_upload", "Create new Service Area/POI")
         with update_tab:
             render_update_tab()
 
-    render_scroll_easter_egg()
     render_footer()
 
 

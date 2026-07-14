@@ -4,7 +4,29 @@ import pandas as pd
 import pytest
 from shapely.geometry import Point
 
-from app import derive_service_area, normalize_poi_dataframe, read_poi_file
+from app import (
+    CREATE_NEW_SERVICE_AREA_OPTION,
+    POI_MARKER_RADIUS_METERS,
+    derive_service_area,
+    normalize_poi_dataframe,
+    read_poi_file,
+    validate_new_service_area_name,
+)
+
+
+def test_create_workflow_uses_new_service_area_option_and_smaller_marker_radius() -> None:
+    assert CREATE_NEW_SERVICE_AREA_OPTION == "(create new service area)"
+    assert POI_MARKER_RADIUS_METERS == 37.5
+
+
+def test_validate_new_service_area_name_rejects_blank_and_duplicate_names() -> None:
+    assert validate_new_service_area_name("  ", ["Singapore"]) == (
+        "Enter a name for the new service area."
+    )
+    assert validate_new_service_area_name(" singapore ", ["Singapore"]) == (
+        "That service area already exists. Enter a different name or choose it from the dropdown."
+    )
+    assert validate_new_service_area_name("Punggol", ["Singapore"]) is None
 
 
 def test_normalize_poi_dataframe_accepts_common_headers() -> None:
