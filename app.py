@@ -23,6 +23,7 @@ REQUIRED_COLUMNS = ("location_name", "latitude", "longitude")
 SUPPORTED_EXTENSIONS = ["csv", "xlsx", "xls"]
 WGS84_CRS = "EPSG:4326"
 SERVICE_AREA_BUFFER_METERS = 1_000
+POI_MARKER_RADIUS_METERS = 150 * 0.25
 
 SERVICE_AREAS: dict[str, dict[str, Any]] = {
     "Singapore": {
@@ -151,7 +152,7 @@ def read_poi_file(file_name: str, file_bytes: bytes) -> pd.DataFrame:
 
 
 def derive_service_area(dataframe: pd.DataFrame) -> dict[str, Any]:
-    """Join cardinal extreme POIs and buffer the result by one kilometre."""
+    """Build a buffered convex hull that contains every uploaded POI."""
 
     normalized_dataframe = normalize_poi_dataframe(dataframe)
     points = gpd.GeoDataFrame(
@@ -173,12 +174,14 @@ def derive_service_area(dataframe: pd.DataFrame) -> dict[str, Any]:
     if metric_crs is None:
         raise ValueError("Could not determine a metric projection for these POIs.")
 
-    metric_extreme_points = extreme_points.to_crs(metric_crs)
-    joined_extremes = unary_union(metric_extreme_points.geometry.tolist()).convex_hull
-    if joined_extremes.geom_type in {"Point", "LineString"}:
-        joined_extremes = joined_extremes.buffer(50)
+    metric_points = points.to_crs(metric_crs)
+    joined_points = unary_union(metric_points.geometry.tolist()).convex_hull
+    if joined_points.geom_type in {"Point", "LineString"}:
+        joined_points = joined_points.buffer(50)
 
-    buffered_geometry = joined_extremes.buffer(SERVICE_AREA_BUFFER_METERS)
+    buffered_geometry = joined_points.buffer(SERVICE_AREA_BUFFER_METERS)
+    if not metric_points.geometry.apply(buffered_geometry.covers).all():
+        raise ValueError("The derived service area does not contain every uploaded POI.")
     service_area_geometry = gpd.GeoSeries(
         [buffered_geometry], crs=metric_crs
     ).to_crs(WGS84_CRS).iloc[0]
@@ -338,7 +341,7 @@ def render_service_area_preview(
                 data=point_data,
                 get_position="[longitude, latitude]",
                 get_fill_color=[249, 115, 22, 220],
-                get_radius=150,
+                get_radius=POI_MARKER_RADIUS_METERS,
                 pickable=True,
             ),
         ],
@@ -448,8 +451,8 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
     st.dataframe(dataframe, width="stretch", hide_index=True)
     st.subheader("Derived service area")
     st.caption(
-        "The most north, east, south, and west POIs are joined into a polygon and "
-        "buffered by 1 km."
+        "All uploaded POIs are joined into a convex-hull polygon and buffered by 1 km. "
+        "Cardinal extremes are retained as audit details."
     )
     render_service_area_preview(dataframe, service_area_record, area_name)
     st.caption(

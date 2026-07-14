@@ -2,6 +2,7 @@ from io import BytesIO
 
 import pandas as pd
 import pytest
+from shapely.geometry import Point
 
 from app import derive_service_area, normalize_poi_dataframe, read_poi_file
 
@@ -52,7 +53,7 @@ def test_read_poi_file_rejects_unsupported_extensions() -> None:
         read_poi_file("sample.json", BytesIO(b"{}").getvalue())
 
 
-def test_derive_service_area_uses_cardinal_extremes_and_one_km_buffer() -> None:
+def test_derive_service_area_uses_all_pois_and_one_km_buffer() -> None:
     dataframe = pd.DataFrame(
         {
             "location_name": ["North", "East", "South", "West"],
@@ -71,6 +72,35 @@ def test_derive_service_area_uses_cardinal_extremes_and_one_km_buffer() -> None:
     assert result["extreme_points"]["east"]["location_name"] == "East"
     assert result["extreme_points"]["south"]["location_name"] == "South"
     assert result["extreme_points"]["west"]["location_name"] == "West"
+    assert all(
+        result["geometry"].covers(Point(row.longitude, row.latitude))
+        for row in dataframe.itertuples()
+    )
+
+
+def test_derive_service_area_covers_reference_station_exit_outlier() -> None:
+    """Regression case based on an MRT exit outside the old extreme-only hull."""
+
+    dataframe = pd.DataFrame(
+        {
+            "location_name": [
+                "Sembawang Exit C",
+                "Changi Airport Exit A",
+                "Harbourfront Exit E",
+                "Tuas Link Exit B",
+                "Marsiling Exit A",
+            ],
+            "latitude": [1.449157, 1.356341, 1.264972, 1.340940, 1.432802],
+            "longitude": [103.819759, 103.989277, 103.821580, 103.636841, 103.774210],
+        }
+    )
+
+    result = derive_service_area(dataframe)
+
+    assert all(
+        result["geometry"].covers(Point(row.longitude, row.latitude))
+        for row in dataframe.itertuples()
+    )
 
 
 def test_derive_service_area_handles_a_single_poi() -> None:

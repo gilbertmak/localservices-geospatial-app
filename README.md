@@ -44,9 +44,10 @@ Authentication, POI records, service-area geometry, and synchronization are inte
 in Streamlit session state. No production identity provider, database, external API, or real user
 data is connected.
 
-For each upload, GeoPandas creates WGS84 point geometries, finds the most north, east, south, and
-west POIs, joins those extremes into a convex-hull polygon, projects it to a local UTM CRS, buffers
-it by 1,000 metres, and stores the resulting service-area geometry separately from the POI rows.
+For each upload, GeoPandas creates WGS84 point geometries, joins all POIs into a convex-hull polygon,
+projects it to a local UTM CRS, buffers it by 1,000 metres, and stores the resulting service-area
+geometry separately from the POI rows. The most north, east, south, and west POIs remain available
+as audit details, but no POI is excluded from the service-area hull.
 
 The footer uses Streamlit's sticky `st.bottom` layout container. The scroll-to-bottom balloon
 easter egg uses a trusted `st.components.v2.component` with `isolate_styles=False`; it is a

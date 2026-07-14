@@ -16,8 +16,9 @@ implemented as local session-state emulations.
 - Validated POIs must render on a Southeast Asia map before confirmation.
 - Confirmed POI rows and derived service-area geometry must be stored in separate simulated
   databases and exposed through the update/download flow.
-- GeoPandas derives the service area by joining the cardinal extreme POIs and buffering the
-  resulting polygon by 1,000 metres in a local metric CRS.
+- GeoPandas derives the service area from the convex hull of all uploaded POIs and buffers the
+  resulting polygon by 1,000 metres in a local metric CRS; cardinal extremes are retained as
+  audit details only.
 - The update flow must provide an expanded download section and a collapsible re-upload section.
 - The footer must say `Created by the SWAT Mobility GIS Team` and include a scroll-to-bottom balloon easter egg.
 - README must document setup, demo credentials, limitations, and validation commands.
@@ -49,6 +50,10 @@ streamlit run app.py --server.headless true
 
 Expected runtime checks: login gate, invalid login, authenticated tabs, CSV/XLSX validation,
 map preview, simulated upload, update download, re-upload, footer copy, and scroll animation.
+
+Latest geospatial regression: the attached LTAMRTStationExitGEOJSON.geojson reference dataset
+contains 597 station exits; the all-POI convex hull covered 597/597 exits, compared with 564/597
+under the previous cardinal-extreme-only algorithm.
 
 ## Decision table
 
