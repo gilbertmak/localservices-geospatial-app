@@ -2,8 +2,55 @@ from io import BytesIO
 
 import pandas as pd
 import pytest
+from shapely.geometry import Point
 
-from app import derive_service_area, normalize_poi_dataframe, read_poi_file
+from app import (
+    CREATE_NEW_SERVICE_AREA_OPTION,
+    POI_MARKER_RADIUS_METERS,
+    build_folium_map,
+    derive_service_area,
+    normalize_poi_dataframe,
+    read_poi_file,
+    validate_new_service_area_name,
+)
+
+
+def test_create_workflow_uses_new_service_area_option_and_smaller_marker_radius() -> None:
+    assert CREATE_NEW_SERVICE_AREA_OPTION == "(create new service area)"
+    assert POI_MARKER_RADIUS_METERS == 37.5
+
+
+def test_build_folium_map_contains_poi_and_service_area_layers() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "location_name": ["Test Hub"],
+            "latitude": [1.3521],
+            "longitude": [103.8198],
+        }
+    )
+    service_area = derive_service_area(dataframe)
+
+    folium_map = build_folium_map(
+        dataframe,
+        "Singapore",
+        zoom=10,
+        empty_label="No POIs",
+        service_area_geometry=service_area["geometry"],
+    )
+    rendered_map = folium_map.get_root().render()
+
+    assert "Test Hub" in rendered_map
+    assert "Singapore service area" in rendered_map
+
+
+def test_validate_new_service_area_name_rejects_blank_and_duplicate_names() -> None:
+    assert validate_new_service_area_name("  ", ["Singapore"]) == (
+        "Enter a name for the new service area."
+    )
+    assert validate_new_service_area_name(" singapore ", ["Singapore"]) == (
+        "That service area already exists. Enter a different name or choose it from the dropdown."
+    )
+    assert validate_new_service_area_name("Punggol", ["Singapore"]) is None
 
 
 def test_normalize_poi_dataframe_accepts_common_headers() -> None:
@@ -52,7 +99,7 @@ def test_read_poi_file_rejects_unsupported_extensions() -> None:
         read_poi_file("sample.json", BytesIO(b"{}").getvalue())
 
 
-def test_derive_service_area_uses_cardinal_extremes_and_one_km_buffer() -> None:
+def test_derive_service_area_uses_all_pois_and_one_km_buffer() -> None:
     dataframe = pd.DataFrame(
         {
             "location_name": ["North", "East", "South", "West"],
@@ -71,6 +118,35 @@ def test_derive_service_area_uses_cardinal_extremes_and_one_km_buffer() -> None:
     assert result["extreme_points"]["east"]["location_name"] == "East"
     assert result["extreme_points"]["south"]["location_name"] == "South"
     assert result["extreme_points"]["west"]["location_name"] == "West"
+    assert all(
+        result["geometry"].covers(Point(row.longitude, row.latitude))
+        for row in dataframe.itertuples()
+    )
+
+
+def test_derive_service_area_covers_reference_station_exit_outlier() -> None:
+    """Regression case based on an MRT exit outside the old extreme-only hull."""
+
+    dataframe = pd.DataFrame(
+        {
+            "location_name": [
+                "Sembawang Exit C",
+                "Changi Airport Exit A",
+                "Harbourfront Exit E",
+                "Tuas Link Exit B",
+                "Marsiling Exit A",
+            ],
+            "latitude": [1.449157, 1.356341, 1.264972, 1.340940, 1.432802],
+            "longitude": [103.819759, 103.989277, 103.821580, 103.636841, 103.774210],
+        }
+    )
+
+    result = derive_service_area(dataframe)
+
+    assert all(
+        result["geometry"].covers(Point(row.longitude, row.latitude))
+        for row in dataframe.itertuples()
+    )
 
 
 def test_derive_service_area_handles_a_single_poi() -> None:

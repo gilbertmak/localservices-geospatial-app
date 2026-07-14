@@ -10,16 +10,18 @@ implemented as local session-state emulations.
 
 - The app must protect the main workspace behind a sidebar login.
 - Demo credentials must be clearly identified and invalid credentials rejected.
-- Authenticated users see **Create new POI** and **Update POI** tabs.
+- Authenticated users see **Create new Service Area/POI** and **Update POI** tabs.
+- The create workflow can target an existing service area or create a uniquely named new one.
 - CSV and Excel uploads require location name, latitude, and longitude columns.
 - Upload processing must show progress/status feedback and validate coordinate ranges.
 - Validated POIs must render on a Southeast Asia map before confirmation.
 - Confirmed POI rows and derived service-area geometry must be stored in separate simulated
   databases and exposed through the update/download flow.
-- GeoPandas derives the service area by joining the cardinal extreme POIs and buffering the
-  resulting polygon by 1,000 metres in a local metric CRS.
+- GeoPandas derives the service area from the convex hull of all uploaded POIs and buffers the
+  resulting polygon by 1,000 metres in a local metric CRS; cardinal extremes are retained as
+  audit details only.
 - The update flow must provide an expanded download section and a collapsible re-upload section.
-- The footer must say `Created by the SWAT Mobility GIS Team` and include a scroll-to-bottom balloon easter egg.
+- The footer must say `Created by the SWAT Mobility GIS Team`; no animation is required.
 - README must document setup, demo credentials, limitations, and validation commands.
 
 ## Assumptions
@@ -36,8 +38,8 @@ implemented as local session-state emulations.
 - Streamlit Community Cloud must install the root `requirements.txt`; the repository intentionally
   keeps one authoritative dependency manifest so GeoPandas is available before `app.py` imports it.
 - Demo credentials and session state must not be presented as production authentication.
-- Streamlit cannot receive arbitrary Python callbacks from browser scroll events, so the footer
-  easter egg is implemented as a trusted client-side `st.components.v2.component`.
+- Movable POI editing is planned separately in `movable-poi-map-plan.md`; no map-editing dependency
+  is introduced until the event-bridge spike is validated.
 
 ## Validation contract
 
@@ -48,7 +50,11 @@ streamlit run app.py --server.headless true
 ```
 
 Expected runtime checks: login gate, invalid login, authenticated tabs, CSV/XLSX validation,
-map preview, simulated upload, update download, re-upload, footer copy, and scroll animation.
+map preview, simulated upload, update download, re-upload, and footer copy.
+
+Latest geospatial regression: the attached LTAMRTStationExitGEOJSON.geojson reference dataset
+contains 597 station exits; the all-POI convex hull covered 597/597 exits, compared with 564/597
+under the previous cardinal-extreme-only algorithm.
 
 ## Decision table
 
@@ -57,5 +63,4 @@ map preview, simulated upload, update download, re-upload, footer copy, and scro
 | Data source | Fully synthetic local data | High | Product Owner |
 | Authentication | One shared demo account using session state | High | Product Owner / Security |
 | Backend | Replace selected POI and service-area records in separate in-memory simulated databases | High | Development |
-| Map | Streamlit `st.map` without external credentials | Medium | Architecture |
-| Footer animation | Trusted client-side `st.components.v2.component` JavaScript | High | Development |
+| Map | Folium/Leaflet rendered through `streamlit-folium`; read-only today, drag editing planned | Medium | Architecture |

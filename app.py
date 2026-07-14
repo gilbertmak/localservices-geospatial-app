@@ -9,10 +9,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+import folium
 import geopandas as gpd
 import pandas as pd
-import pydeck as pdk
 import streamlit as st
+from streamlit_folium import st_folium
 from shapely.ops import unary_union
 
 
@@ -23,6 +24,10 @@ REQUIRED_COLUMNS = ("location_name", "latitude", "longitude")
 SUPPORTED_EXTENSIONS = ["csv", "xlsx", "xls"]
 WGS84_CRS = "EPSG:4326"
 SERVICE_AREA_BUFFER_METERS = 1_000
+POI_MARKER_RADIUS_METERS = 150 * 0.25
+FOLIUM_POI_MARKER_RADIUS_PIXELS = 4
+DEFAULT_MAP_CENTER = (1.3521, 103.8198)
+CREATE_NEW_SERVICE_AREA_OPTION = "(create new service area)"
 
 SERVICE_AREAS: dict[str, dict[str, Any]] = {
     "Singapore": {
@@ -151,7 +156,7 @@ def read_poi_file(file_name: str, file_bytes: bytes) -> pd.DataFrame:
 
 
 def derive_service_area(dataframe: pd.DataFrame) -> dict[str, Any]:
-    """Join cardinal extreme POIs and buffer the result by one kilometre."""
+    """Build a buffered convex hull that contains every uploaded POI."""
 
     normalized_dataframe = normalize_poi_dataframe(dataframe)
     points = gpd.GeoDataFrame(
@@ -173,12 +178,14 @@ def derive_service_area(dataframe: pd.DataFrame) -> dict[str, Any]:
     if metric_crs is None:
         raise ValueError("Could not determine a metric projection for these POIs.")
 
-    metric_extreme_points = extreme_points.to_crs(metric_crs)
-    joined_extremes = unary_union(metric_extreme_points.geometry.tolist()).convex_hull
-    if joined_extremes.geom_type in {"Point", "LineString"}:
-        joined_extremes = joined_extremes.buffer(50)
+    metric_points = points.to_crs(metric_crs)
+    joined_points = unary_union(metric_points.geometry.tolist()).convex_hull
+    if joined_points.geom_type in {"Point", "LineString"}:
+        joined_points = joined_points.buffer(50)
 
-    buffered_geometry = joined_extremes.buffer(SERVICE_AREA_BUFFER_METERS)
+    buffered_geometry = joined_points.buffer(SERVICE_AREA_BUFFER_METERS)
+    if not metric_points.geometry.apply(buffered_geometry.covers).all():
+        raise ValueError("The derived service area does not contain every uploaded POI.")
     service_area_geometry = gpd.GeoSeries(
         [buffered_geometry], crs=metric_crs
     ).to_crs(WGS84_CRS).iloc[0]
@@ -236,6 +243,26 @@ def service_area_names() -> list[str]:
     return list(st.session_state.service_area_database)
 
 
+def validate_new_service_area_name(
+    name: str,
+    existing_names: list[str],
+) -> str | None:
+    """Return a user-facing validation error for a new service-area name."""
+
+    normalized_name = name.strip()
+    if not normalized_name:
+        return "Enter a name for the new service area."
+    if any(
+        existing_name.casefold() == normalized_name.casefold()
+        for existing_name in existing_names
+    ):
+        return (
+            "That service area already exists. Enter a different name or choose it "
+            "from the dropdown."
+        )
+    return None
+
+
 def render_sidebar() -> None:
     """Render the login surface and demo connection status."""
 
@@ -272,29 +299,95 @@ def render_sidebar() -> None:
         st.caption("No production credentials or data are used.")
 
 
+def build_folium_map(
+    dataframe: pd.DataFrame | None,
+    area_name: str,
+    *,
+    zoom: int,
+    empty_label: str,
+    service_area_geometry: Any | None = None,
+) -> folium.Map:
+    """Build a Folium map with POIs and an optional service-area polygon."""
+
+    if dataframe is None or dataframe.empty:
+        latitude, longitude = SERVICE_AREAS.get(
+            area_name, {"center": DEFAULT_MAP_CENTER}
+        )["center"]
+        map_dataframe = None
+    else:
+        map_dataframe = dataframe[["location_name", "latitude", "longitude"]].copy()
+
+    if map_dataframe is not None:
+        latitude = float(map_dataframe["latitude"].mean())
+        longitude = float(map_dataframe["longitude"].mean())
+
+    folium_map = folium.Map(
+        location=[latitude, longitude],
+        zoom_start=zoom,
+        tiles="OpenStreetMap",
+        control_scale=True,
+    )
+
+    if map_dataframe is None:
+        folium.Marker(
+            location=[latitude, longitude],
+            tooltip=empty_label,
+            icon=folium.Icon(color="blue", icon="info-sign"),
+        ).add_to(folium_map)
+    else:
+        for row in map_dataframe.itertuples(index=False):
+            folium.CircleMarker(
+                location=[float(row.latitude), float(row.longitude)],
+                radius=FOLIUM_POI_MARKER_RADIUS_PIXELS,
+                color="#f97316",
+                fill=True,
+                fill_color="#f97316",
+                fill_opacity=0.85,
+                tooltip=str(row.location_name),
+            ).add_to(folium_map)
+
+    if service_area_geometry is not None:
+        folium.GeoJson(
+            data=service_area_geometry.__geo_interface__,
+            name=f"{area_name} service area",
+            style_function=lambda _: {
+                "color": "#0f766e",
+                "weight": 3,
+                "fillColor": "#0f766e",
+                "fillOpacity": 0.18,
+            },
+            highlight_function=lambda _: {"weight": 5, "fillOpacity": 0.28},
+            tooltip=folium.Tooltip(f"{area_name} service area"),
+        ).add_to(folium_map)
+        min_x, min_y, max_x, max_y = service_area_geometry.bounds
+        folium_map.fit_bounds([[min_y, min_x], [max_y, max_x]])
+
+    return folium_map
+
+
 def render_map(
     dataframe: pd.DataFrame | None,
     area_name: str,
     *,
     zoom: int,
     empty_label: str,
+    map_key: str,
 ) -> None:
-    """Render a Streamlit map with a Southeast Asia or service-area default view."""
+    """Render a Folium map with a Southeast Asia or service-area default view."""
 
-    if dataframe is None or dataframe.empty:
-        latitude, longitude = SERVICE_AREAS[area_name]["center"]
-        map_dataframe = pd.DataFrame(
-            [{"location_name": empty_label, "latitude": latitude, "longitude": longitude}]
-        )
-    else:
-        map_dataframe = dataframe[["location_name", "latitude", "longitude"]].copy()
-
-    st.map(
-        map_dataframe,
-        latitude="latitude",
-        longitude="longitude",
+    folium_map = build_folium_map(
+        dataframe,
+        area_name,
         zoom=zoom,
+        empty_label=empty_label,
+    )
+    st_folium(
+        folium_map,
+        key=map_key,
         height=470,
+        width=None,
+        use_container_width=True,
+        returned_objects=[],
     )
 
 
@@ -302,49 +395,27 @@ def render_service_area_preview(
     dataframe: pd.DataFrame,
     service_area_record: dict[str, Any],
     area_name: str,
+    *,
+    map_key: str,
 ) -> None:
-    """Render POIs and the derived service-area polygon together."""
+    """Render POIs and the derived service-area polygon together in Folium."""
 
     geometry = service_area_record["geometry"]
-    polygon_coordinates = [
-        [float(longitude), float(latitude)]
-        for longitude, latitude in geometry.exterior.coords
-    ]
-    centroid = geometry.centroid
-    polygon_data = [{"polygon": polygon_coordinates, "service_area": area_name}]
-    point_data = dataframe.to_dict(orient="records")
-    deck = pdk.Deck(
-        map_style=None,
-        initial_view_state=pdk.ViewState(
-            latitude=float(centroid.y),
-            longitude=float(centroid.x),
-            zoom=10,
-            pitch=0,
-        ),
-        layers=[
-            pdk.Layer(
-                "PolygonLayer",
-                data=polygon_data,
-                get_polygon="polygon",
-                get_fill_color=[15, 118, 110, 55],
-                get_line_color=[15, 118, 110, 220],
-                get_line_width=4,
-                filled=True,
-                stroked=True,
-                pickable=True,
-            ),
-            pdk.Layer(
-                "ScatterplotLayer",
-                data=point_data,
-                get_position="[longitude, latitude]",
-                get_fill_color=[249, 115, 22, 220],
-                get_radius=150,
-                pickable=True,
-            ),
-        ],
-        tooltip={"html": "<b>{location_name}</b>"},
+    folium_map = build_folium_map(
+        dataframe,
+        area_name,
+        zoom=10,
+        empty_label="No POIs uploaded",
+        service_area_geometry=geometry,
     )
-    st.pydeck_chart(deck, height=470, width="stretch")
+    st_folium(
+        folium_map,
+        key=map_key,
+        height=470,
+        width=None,
+        use_container_width=True,
+        returned_objects=[],
+    )
 
 
 def _process_upload(uploaded_file: Any, key_prefix: str) -> tuple[pd.DataFrame | None, str | None]:
@@ -404,12 +475,30 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
     """Render the reusable create/re-upload POI workflow."""
 
     st.subheader(heading)
-    area_name = st.selectbox(
+    area_options = service_area_names()
+    allow_new_service_area = key_prefix == "create_upload"
+    if allow_new_service_area:
+        area_options = [*area_options, CREATE_NEW_SERVICE_AREA_OPTION]
+
+    selected_area = st.selectbox(
         "Service area",
-        service_area_names(),
+        area_options,
         key=f"{key_prefix}_area",
         help="Choose where the uploaded POI data belongs.",
     )
+    area_name = selected_area
+    area_name_error: str | None = None
+    if allow_new_service_area and selected_area == CREATE_NEW_SERVICE_AREA_OPTION:
+        new_area_name = st.text_input(
+            "New service area name",
+            key=f"{key_prefix}_new_area_name",
+            placeholder="e.g. Punggol",
+            help="Enter a unique name for the new service area.",
+        ).strip()
+        area_name = new_area_name
+        area_name_error = validate_new_service_area_name(
+            new_area_name, service_area_names()
+        )
 
     map_container = st.container()
     uploaded_file = st.file_uploader(
@@ -424,14 +513,19 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
         st.caption("Map preview · default view: Southeast Asia")
         render_map(
             dataframe,
-            area_name,
+            area_name or selected_area,
             zoom=4,
             empty_label="Southeast Asia preview",
+            map_key=f"{key_prefix}_overview_map",
         )
 
     if error:
         st.error(f"Upload could not be validated: {error}")
         st.info("Required columns: location name, latitude, longitude.")
+        return
+
+    if area_name_error:
+        st.error(area_name_error)
         return
 
     if dataframe is None:
@@ -448,10 +542,15 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
     st.dataframe(dataframe, width="stretch", hide_index=True)
     st.subheader("Derived service area")
     st.caption(
-        "The most north, east, south, and west POIs are joined into a polygon and "
-        "buffered by 1 km."
+        "All uploaded POIs are joined into a convex-hull polygon and buffered by 1 km. "
+        "Cardinal extremes are retained as audit details."
     )
-    render_service_area_preview(dataframe, service_area_record, area_name)
+    render_service_area_preview(
+        dataframe,
+        service_area_record,
+        area_name,
+        map_key=f"{key_prefix}_service_area_map",
+    )
     st.caption(
         f"Source POI database rows: {len(dataframe)} · "
         f"Service-area database shape: {service_area_record['area_sq_km']:.2f} km² · "
@@ -495,7 +594,12 @@ def render_update_tab() -> None:
             f"Service-area database record · {len(current_data)} POI row(s) · "
             f"{service_area_record['area_sq_km']:.2f} km²"
         )
-        render_service_area_preview(current_data, service_area_record, area_name)
+        render_service_area_preview(
+            current_data,
+            service_area_record,
+            area_name,
+            map_key="update_download_service_area_map",
+        )
         st.download_button(
             "Download POI CSV",
             data=current_data.to_csv(index=False).encode("utf-8"),
@@ -507,90 +611,6 @@ def render_update_tab() -> None:
 
     with st.expander("2 · Re-upload POI data", expanded=False):
         render_upload_workflow("update_upload", "Replace POI records")
-
-
-@st.cache_resource(show_spinner=False)
-def _get_scroll_easter_egg_component() -> Any:
-    """Register the custom component once for the lifetime of the Streamlit process."""
-
-    return st.components.v2.component(
-        "lsge_scroll_easter_egg",
-        html="<div aria-hidden='true'></div>",
-        css="""
-          .lsge-balloon-overlay {
-            position: fixed;
-            inset: 0;
-            z-index: 999999;
-            pointer-events: none;
-            overflow: hidden;
-          }
-          .lsge-balloon {
-            position: absolute;
-            bottom: -90px;
-            width: 24px;
-            height: 32px;
-            border-radius: 50% 50% 45% 45%;
-            box-shadow: inset -5px -4px 0 rgba(0,0,0,.12);
-            animation: lsge-float 4.8s ease-in forwards;
-          }
-          .lsge-balloon::after {
-            content: "";
-            position: absolute;
-            left: 50%;
-            top: 30px;
-            width: 1px;
-            height: 52px;
-            background: rgba(15,23,42,.35);
-          }
-          @keyframes lsge-float {
-            0% { transform: translate3d(0, 0, 0) rotate(-6deg); opacity: 0; }
-            12% { opacity: 1; }
-            100% { transform: translate3d(0, -115vh, 0) rotate(10deg); opacity: 0; }
-          }
-        """,
-        js="""
-        export default function(component) {
-          const scrollTarget = document.querySelector('[data-testid="stMain"]') || window;
-          const celebrate = () => {
-            const viewportHeight = scrollTarget === window ? window.innerHeight : scrollTarget.clientHeight;
-            const scrollPosition = scrollTarget === window ? window.scrollY : scrollTarget.scrollTop;
-            const contentHeight = scrollTarget === window ? document.documentElement.scrollHeight : scrollTarget.scrollHeight;
-            const nearBottom = viewportHeight + scrollPosition >= contentHeight - 72;
-            if (!nearBottom || window.__lsgeScrollEggTriggered) return;
-            window.__lsgeScrollEggTriggered = true;
-            const overlay = document.createElement("div");
-            overlay.className = "lsge-balloon-overlay";
-            const colors = ["#0f766e", "#f97316", "#2563eb", "#eab308", "#db2777"];
-            for (let index = 0; index < 20; index += 1) {
-              const balloon = document.createElement("span");
-              balloon.className = "lsge-balloon";
-              balloon.style.left = `${(index * 47) % 101}%`;
-              balloon.style.background = colors[index % colors.length];
-              balloon.style.animationDelay = `${(index % 7) * 0.12}s`;
-              overlay.appendChild(balloon);
-            }
-            document.body.appendChild(overlay);
-            window.setTimeout(() => overlay.remove(), 5600);
-          };
-
-          window.__lsgeScrollEggTriggered = false;
-          scrollTarget.addEventListener("scroll", celebrate, { passive: true });
-          window.addEventListener("resize", celebrate);
-          return () => {
-            scrollTarget.removeEventListener("scroll", celebrate);
-            window.removeEventListener("resize", celebrate);
-          };
-        }
-        """,
-        isolate_styles=False,
-    )
-
-
-def render_scroll_easter_egg() -> None:
-    """Add a trusted, client-side balloon animation when the user reaches the footer."""
-
-    component = _get_scroll_easter_egg_component()
-    component(key="lsge_scroll_easter_egg_instance")
 
 
 def render_footer() -> None:
@@ -648,13 +668,12 @@ def main() -> None:
         )
         st.caption(f"Signed in as {st.session_state.username} · Backend: simulated")
 
-        create_tab, update_tab = st.tabs(["Create new POI", "Update POI"])
+        create_tab, update_tab = st.tabs(["Create new Service Area/POI", "Update POI"])
         with create_tab:
-            render_upload_workflow("create_upload", "Create new POI")
+            render_upload_workflow("create_upload", "Create new Service Area/POI")
         with update_tab:
             render_update_tab()
 
-    render_scroll_easter_egg()
     render_footer()
 
 
