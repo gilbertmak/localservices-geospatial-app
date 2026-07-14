@@ -33,6 +33,8 @@ implemented as local session-state emulations.
 ## Risks and dependencies
 
 - Streamlit and Excel parsing dependencies must be installed before runtime validation.
+- Streamlit Community Cloud must install the root `requirements.txt`; the repository intentionally
+  keeps one authoritative dependency manifest so GeoPandas is available before `app.py` imports it.
 - Demo credentials and session state must not be presented as production authentication.
 - Streamlit cannot receive arbitrary Python callbacks from browser scroll events, so the footer
   easter egg is implemented as a trusted client-side `st.components.v2.component`.

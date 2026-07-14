@@ -11,6 +11,10 @@ python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
+Streamlit Community Cloud uses the root `requirements.txt` as the single dependency manifest,
+following its [dependency-file precedence rules](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/app-dependencies).
+It includes GeoPandas for service-area generation and PyDeck for polygon previews.
+
 For test execution, install the development requirements instead:
 
 ```bash
