@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from html import escape
 import io
 import re
 import time
@@ -25,8 +26,10 @@ SUPPORTED_EXTENSIONS = ["csv", "xlsx", "xls"]
 WGS84_CRS = "EPSG:4326"
 SERVICE_AREA_BUFFER_METERS = 1_000
 POI_MARKER_RADIUS_METERS = 150 * 0.25
-FOLIUM_POI_MARKER_RADIUS_PIXELS = 4
-DEFAULT_MAP_CENTER = (1.3521, 103.8198)
+POI_MARKER_COLOR = "#6D28D9"
+POI_MARKER_BORDER_COLOR = "#FFFFFF"
+DEFAULT_MAP_CENTER = (7.5, 110.0)
+DEFAULT_MAP_ZOOM = 4
 CREATE_NEW_SERVICE_AREA_OPTION = "(create new service area)"
 
 SERVICE_AREAS: dict[str, dict[str, Any]] = {
@@ -299,6 +302,41 @@ def render_sidebar() -> None:
         st.caption("No production credentials or data are used.")
 
 
+def add_non_draggable_poi_marker(
+    folium_map: folium.Map,
+    location_name: str,
+    latitude: float,
+    longitude: float,
+) -> None:
+    """Add a high-priority clickable POI marker with dragging explicitly disabled."""
+
+    escaped_name = escape(location_name)
+    popup = folium.Popup(
+        f"<b>{escaped_name}</b><br>"
+        f"Latitude: {latitude:.6f}<br>Longitude: {longitude:.6f}",
+        max_width=260,
+    )
+    folium.Marker(
+        location=[latitude, longitude],
+        icon=folium.DivIcon(
+            html=(
+                f'<div aria-label="{escaped_name}" '
+                f'style="background:{POI_MARKER_COLOR}; '
+                f'border:2px solid {POI_MARKER_BORDER_COLOR}; '
+                'border-radius:50%; width:10px; height:10px; '
+                'box-shadow:0 1px 4px rgba(15,23,42,.55);"></div>'
+            ),
+            icon_size=(14, 14),
+            icon_anchor=(7, 7),
+        ),
+        popup=popup,
+        tooltip=location_name,
+        pane="poi-pane",
+        z_index_offset=1000,
+        draggable=False,
+    ).add_to(folium_map)
+
+
 def build_folium_map(
     dataframe: pd.DataFrame | None,
     area_name: str,
@@ -310,9 +348,7 @@ def build_folium_map(
     """Build a Folium map with POIs and an optional service-area polygon."""
 
     if dataframe is None or dataframe.empty:
-        latitude, longitude = SERVICE_AREAS.get(
-            area_name, {"center": DEFAULT_MAP_CENTER}
-        )["center"]
+        latitude, longitude = DEFAULT_MAP_CENTER
         map_dataframe = None
     else:
         map_dataframe = dataframe[["location_name", "latitude", "longitude"]].copy()
@@ -327,6 +363,14 @@ def build_folium_map(
         tiles="OpenStreetMap",
         control_scale=True,
     )
+    folium.map.CustomPane(
+        "service-area-pane",
+        z_index=400,
+        pointer_events=False,
+    ).add_to(folium_map)
+    folium.map.CustomPane("poi-pane", z_index=650, pointer_events=True).add_to(
+        folium_map
+    )
 
     if map_dataframe is None:
         folium.Marker(
@@ -336,20 +380,18 @@ def build_folium_map(
         ).add_to(folium_map)
     else:
         for row in map_dataframe.itertuples(index=False):
-            folium.CircleMarker(
-                location=[float(row.latitude), float(row.longitude)],
-                radius=FOLIUM_POI_MARKER_RADIUS_PIXELS,
-                color="#f97316",
-                fill=True,
-                fill_color="#f97316",
-                fill_opacity=0.85,
-                tooltip=str(row.location_name),
-            ).add_to(folium_map)
+            add_non_draggable_poi_marker(
+                folium_map,
+                str(row.location_name),
+                float(row.latitude),
+                float(row.longitude),
+            )
 
     if service_area_geometry is not None:
         folium.GeoJson(
             data=service_area_geometry.__geo_interface__,
             name=f"{area_name} service area",
+            pane="service-area-pane",
             style_function=lambda _: {
                 "color": "#0f766e",
                 "weight": 3,
@@ -514,7 +556,7 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
         render_map(
             dataframe,
             area_name or selected_area,
-            zoom=4,
+            zoom=DEFAULT_MAP_ZOOM,
             empty_label="Southeast Asia preview",
             map_key=f"{key_prefix}_overview_map",
         )
