@@ -7,6 +7,7 @@ from shapely.geometry import Point
 from app import (
     CREATE_NEW_SERVICE_AREA_OPTION,
     POI_MARKER_RADIUS_METERS,
+    build_folium_map,
     derive_service_area,
     normalize_poi_dataframe,
     read_poi_file,
@@ -17,6 +18,29 @@ from app import (
 def test_create_workflow_uses_new_service_area_option_and_smaller_marker_radius() -> None:
     assert CREATE_NEW_SERVICE_AREA_OPTION == "(create new service area)"
     assert POI_MARKER_RADIUS_METERS == 37.5
+
+
+def test_build_folium_map_contains_poi_and_service_area_layers() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "location_name": ["Test Hub"],
+            "latitude": [1.3521],
+            "longitude": [103.8198],
+        }
+    )
+    service_area = derive_service_area(dataframe)
+
+    folium_map = build_folium_map(
+        dataframe,
+        "Singapore",
+        zoom=10,
+        empty_label="No POIs",
+        service_area_geometry=service_area["geometry"],
+    )
+    rendered_map = folium_map.get_root().render()
+
+    assert "Test Hub" in rendered_map
+    assert "Singapore service area" in rendered_map
 
 
 def test_validate_new_service_area_name_rejects_blank_and_duplicate_names() -> None:

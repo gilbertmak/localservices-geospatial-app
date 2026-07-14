@@ -9,10 +9,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+import folium
 import geopandas as gpd
 import pandas as pd
-import pydeck as pdk
 import streamlit as st
+from streamlit_folium import st_folium
 from shapely.ops import unary_union
 
 
@@ -24,6 +25,7 @@ SUPPORTED_EXTENSIONS = ["csv", "xlsx", "xls"]
 WGS84_CRS = "EPSG:4326"
 SERVICE_AREA_BUFFER_METERS = 1_000
 POI_MARKER_RADIUS_METERS = 150 * 0.25
+FOLIUM_POI_MARKER_RADIUS_PIXELS = 4
 DEFAULT_MAP_CENTER = (1.3521, 103.8198)
 CREATE_NEW_SERVICE_AREA_OPTION = "(create new service area)"
 
@@ -297,31 +299,95 @@ def render_sidebar() -> None:
         st.caption("No production credentials or data are used.")
 
 
+def build_folium_map(
+    dataframe: pd.DataFrame | None,
+    area_name: str,
+    *,
+    zoom: int,
+    empty_label: str,
+    service_area_geometry: Any | None = None,
+) -> folium.Map:
+    """Build a Folium map with POIs and an optional service-area polygon."""
+
+    if dataframe is None or dataframe.empty:
+        latitude, longitude = SERVICE_AREAS.get(
+            area_name, {"center": DEFAULT_MAP_CENTER}
+        )["center"]
+        map_dataframe = None
+    else:
+        map_dataframe = dataframe[["location_name", "latitude", "longitude"]].copy()
+
+    if map_dataframe is not None:
+        latitude = float(map_dataframe["latitude"].mean())
+        longitude = float(map_dataframe["longitude"].mean())
+
+    folium_map = folium.Map(
+        location=[latitude, longitude],
+        zoom_start=zoom,
+        tiles="OpenStreetMap",
+        control_scale=True,
+    )
+
+    if map_dataframe is None:
+        folium.Marker(
+            location=[latitude, longitude],
+            tooltip=empty_label,
+            icon=folium.Icon(color="blue", icon="info-sign"),
+        ).add_to(folium_map)
+    else:
+        for row in map_dataframe.itertuples(index=False):
+            folium.CircleMarker(
+                location=[float(row.latitude), float(row.longitude)],
+                radius=FOLIUM_POI_MARKER_RADIUS_PIXELS,
+                color="#f97316",
+                fill=True,
+                fill_color="#f97316",
+                fill_opacity=0.85,
+                tooltip=str(row.location_name),
+            ).add_to(folium_map)
+
+    if service_area_geometry is not None:
+        folium.GeoJson(
+            data=service_area_geometry.__geo_interface__,
+            name=f"{area_name} service area",
+            style_function=lambda _: {
+                "color": "#0f766e",
+                "weight": 3,
+                "fillColor": "#0f766e",
+                "fillOpacity": 0.18,
+            },
+            highlight_function=lambda _: {"weight": 5, "fillOpacity": 0.28},
+            tooltip=folium.Tooltip(f"{area_name} service area"),
+        ).add_to(folium_map)
+        min_x, min_y, max_x, max_y = service_area_geometry.bounds
+        folium_map.fit_bounds([[min_y, min_x], [max_y, max_x]])
+
+    return folium_map
+
+
 def render_map(
     dataframe: pd.DataFrame | None,
     area_name: str,
     *,
     zoom: int,
     empty_label: str,
+    map_key: str,
 ) -> None:
-    """Render a Streamlit map with a Southeast Asia or service-area default view."""
+    """Render a Folium map with a Southeast Asia or service-area default view."""
 
-    if dataframe is None or dataframe.empty:
-        latitude, longitude = SERVICE_AREAS.get(
-            area_name, {"center": DEFAULT_MAP_CENTER}
-        )["center"]
-        map_dataframe = pd.DataFrame(
-            [{"location_name": empty_label, "latitude": latitude, "longitude": longitude}]
-        )
-    else:
-        map_dataframe = dataframe[["location_name", "latitude", "longitude"]].copy()
-
-    st.map(
-        map_dataframe,
-        latitude="latitude",
-        longitude="longitude",
+    folium_map = build_folium_map(
+        dataframe,
+        area_name,
         zoom=zoom,
+        empty_label=empty_label,
+    )
+    st_folium(
+        folium_map,
+        key=map_key,
         height=470,
+        width=None,
+        use_container_width=True,
+        returned_objects=[],
     )
 
 
@@ -329,49 +395,27 @@ def render_service_area_preview(
     dataframe: pd.DataFrame,
     service_area_record: dict[str, Any],
     area_name: str,
+    *,
+    map_key: str,
 ) -> None:
-    """Render POIs and the derived service-area polygon together."""
+    """Render POIs and the derived service-area polygon together in Folium."""
 
     geometry = service_area_record["geometry"]
-    polygon_coordinates = [
-        [float(longitude), float(latitude)]
-        for longitude, latitude in geometry.exterior.coords
-    ]
-    centroid = geometry.centroid
-    polygon_data = [{"polygon": polygon_coordinates, "service_area": area_name}]
-    point_data = dataframe.to_dict(orient="records")
-    deck = pdk.Deck(
-        map_style=None,
-        initial_view_state=pdk.ViewState(
-            latitude=float(centroid.y),
-            longitude=float(centroid.x),
-            zoom=10,
-            pitch=0,
-        ),
-        layers=[
-            pdk.Layer(
-                "PolygonLayer",
-                data=polygon_data,
-                get_polygon="polygon",
-                get_fill_color=[15, 118, 110, 55],
-                get_line_color=[15, 118, 110, 220],
-                get_line_width=4,
-                filled=True,
-                stroked=True,
-                pickable=True,
-            ),
-            pdk.Layer(
-                "ScatterplotLayer",
-                data=point_data,
-                get_position="[longitude, latitude]",
-                get_fill_color=[249, 115, 22, 220],
-                get_radius=POI_MARKER_RADIUS_METERS,
-                pickable=True,
-            ),
-        ],
-        tooltip={"html": "<b>{location_name}</b>"},
+    folium_map = build_folium_map(
+        dataframe,
+        area_name,
+        zoom=10,
+        empty_label="No POIs uploaded",
+        service_area_geometry=geometry,
     )
-    st.pydeck_chart(deck, height=470, width="stretch")
+    st_folium(
+        folium_map,
+        key=map_key,
+        height=470,
+        width=None,
+        use_container_width=True,
+        returned_objects=[],
+    )
 
 
 def _process_upload(uploaded_file: Any, key_prefix: str) -> tuple[pd.DataFrame | None, str | None]:
@@ -472,6 +516,7 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
             area_name or selected_area,
             zoom=4,
             empty_label="Southeast Asia preview",
+            map_key=f"{key_prefix}_overview_map",
         )
 
     if error:
@@ -500,7 +545,12 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
         "All uploaded POIs are joined into a convex-hull polygon and buffered by 1 km. "
         "Cardinal extremes are retained as audit details."
     )
-    render_service_area_preview(dataframe, service_area_record, area_name)
+    render_service_area_preview(
+        dataframe,
+        service_area_record,
+        area_name,
+        map_key=f"{key_prefix}_service_area_map",
+    )
     st.caption(
         f"Source POI database rows: {len(dataframe)} · "
         f"Service-area database shape: {service_area_record['area_sq_km']:.2f} km² · "
@@ -544,7 +594,12 @@ def render_update_tab() -> None:
             f"Service-area database record · {len(current_data)} POI row(s) · "
             f"{service_area_record['area_sq_km']:.2f} km²"
         )
-        render_service_area_preview(current_data, service_area_record, area_name)
+        render_service_area_preview(
+            current_data,
+            service_area_record,
+            area_name,
+            map_key="update_download_service_area_map",
+        )
         st.download_button(
             "Download POI CSV",
             data=current_data.to_csv(index=False).encode("utf-8"),

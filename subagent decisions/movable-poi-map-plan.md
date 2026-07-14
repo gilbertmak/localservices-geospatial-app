@@ -1,5 +1,10 @@
 # Movable POI Map Plan
 
+## Current status
+
+The read-only map renderer has been migrated to Folium/Leaflet. Draggable marker events and edit
+persistence remain a future stage.
+
 ## Decision
 
 Use a Folium/Leaflet editing map for the POI-location editing mode. Folium's `Marker` supports
@@ -29,7 +34,7 @@ References:
 
 ### Stage 1 — Interaction spike
 
-- Add `folium` and `streamlit-folium` in a separate branch.
+- Use the current Folium and `streamlit-folium` map implementation as the spike baseline.
 - Render a small five-POI test map with stable POI IDs and `draggable=True` markers.
 - Verify whether the Streamlit bridge returns `dragend` coordinates reliably on desktop and touch.
 - Reject edits with invalid coordinates and preserve the last valid state.

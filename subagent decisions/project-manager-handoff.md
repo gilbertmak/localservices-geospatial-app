@@ -50,7 +50,7 @@ streamlit run app.py --server.headless true
 ```
 
 Expected runtime checks: login gate, invalid login, authenticated tabs, CSV/XLSX validation,
-map preview, simulated upload, update download, re-upload, footer copy, and scroll animation.
+map preview, simulated upload, update download, re-upload, and footer copy.
 
 Latest geospatial regression: the attached LTAMRTStationExitGEOJSON.geojson reference dataset
 contains 597 station exits; the all-POI convex hull covered 597/597 exits, compared with 564/597
@@ -63,5 +63,4 @@ under the previous cardinal-extreme-only algorithm.
 | Data source | Fully synthetic local data | High | Product Owner |
 | Authentication | One shared demo account using session state | High | Product Owner / Security |
 | Backend | Replace selected POI and service-area records in separate in-memory simulated databases | High | Development |
-| Map | Streamlit `st.map` without external credentials | Medium | Architecture |
-| Footer animation | Trusted client-side `st.components.v2.component` JavaScript | High | Development |
+| Map | Folium/Leaflet rendered through `streamlit-folium`; read-only today, drag editing planned | Medium | Architecture |
