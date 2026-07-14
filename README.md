@@ -52,6 +52,10 @@ as audit details, but no POI is excluded from the service-area hull.
 
 The footer uses Streamlit's sticky `st.bottom` layout container.
 
+The initial POI map view is centered and zoomed to Southeast Asia. POIs use a deep-violet
+(`#6D28D9`) marker with a white outline so they remain visible against OpenStreetMap's green,
+blue, and pink land-use colors. POI markers open a detail popup and are intentionally non-draggable.
+
 The planned movable-POI interaction is documented in
 [`subagent decisions/movable-poi-map-plan.md`](subagent%20decisions/movable-poi-map-plan.md).
 

@@ -38,8 +38,8 @@ implemented as local session-state emulations.
 - Streamlit Community Cloud must install the root `requirements.txt`; the repository intentionally
   keeps one authoritative dependency manifest so GeoPandas is available before `app.py` imports it.
 - Demo credentials and session state must not be presented as production authentication.
-- Movable POI editing is planned separately in `movable-poi-map-plan.md`; no map-editing dependency
-  is introduced until the event-bridge spike is validated.
+- Movable POI editing is planned separately in `movable-poi-map-plan.md`; current POIs are clickable
+  top-layer markers with dragging explicitly disabled.
 
 ## Validation contract
 
@@ -63,4 +63,4 @@ under the previous cardinal-extreme-only algorithm.
 | Data source | Fully synthetic local data | High | Product Owner |
 | Authentication | One shared demo account using session state | High | Product Owner / Security |
 | Backend | Replace selected POI and service-area records in separate in-memory simulated databases | High | Development |
-| Map | Folium/Leaflet rendered through `streamlit-folium`; read-only today, drag editing planned | Medium | Architecture |
+| Map | Folium/Leaflet rendered through `streamlit-folium`; Southeast Asia default, clickable top-layer POIs, drag editing planned | Medium | Architecture |

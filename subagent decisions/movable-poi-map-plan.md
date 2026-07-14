@@ -2,8 +2,8 @@
 
 ## Current status
 
-The read-only map renderer has been migrated to Folium/Leaflet. Draggable marker events and edit
-persistence remain a future stage.
+The read-only map renderer has been migrated to Folium/Leaflet. POIs are currently top-layer,
+clickable, and explicitly non-draggable; drag events and edit persistence remain a future stage.
 
 ## Decision
 

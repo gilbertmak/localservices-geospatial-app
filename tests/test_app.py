@@ -2,11 +2,13 @@ from io import BytesIO
 
 import pandas as pd
 import pytest
+import folium
 from shapely.geometry import Point
 
 from app import (
     CREATE_NEW_SERVICE_AREA_OPTION,
     POI_MARKER_RADIUS_METERS,
+    POI_MARKER_COLOR,
     build_folium_map,
     derive_service_area,
     normalize_poi_dataframe,
@@ -41,6 +43,12 @@ def test_build_folium_map_contains_poi_and_service_area_layers() -> None:
 
     assert "Test Hub" in rendered_map
     assert "Singapore service area" in rendered_map
+    assert POI_MARKER_COLOR in rendered_map
+    poi_marker = next(
+        child for child in folium_map._children.values() if isinstance(child, folium.Marker)
+    )
+    assert poi_marker.options.get("draggable", False) is False
+    assert poi_marker.options["pane"] == "poi-pane"
 
 
 def test_validate_new_service_area_name_rejects_blank_and_duplicate_names() -> None:
