@@ -30,6 +30,7 @@ POI_MARKER_COLOR = "#6D28D9"
 POI_MARKER_BORDER_COLOR = "#FFFFFF"
 DEFAULT_MAP_CENTER = (7.5, 110.0)
 DEFAULT_MAP_ZOOM = 4
+DOWNLOAD_DEFAULT_MAP_ZOOM = 10
 CREATE_NEW_SERVICE_AREA_OPTION = "(create new service area)"
 
 SERVICE_AREAS: dict[str, dict[str, Any]] = {
@@ -211,6 +212,38 @@ def derive_service_area(dataframe: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def merge_service_area_records(
+    existing_record: dict[str, Any],
+    updated_record: dict[str, Any],
+) -> dict[str, Any]:
+    """Union an existing service area with the newly derived upload area."""
+
+    metric_crs = updated_record.get("metric_crs") or existing_record.get("metric_crs")
+    if not metric_crs:
+        raise ValueError("Could not determine a metric projection for the service areas.")
+
+    metric_geometries = gpd.GeoSeries(
+        [existing_record["geometry"], updated_record["geometry"]],
+        crs=WGS84_CRS,
+    ).to_crs(metric_crs)
+    merged_metric_geometry = unary_union(metric_geometries.tolist())
+    merged_geometry = gpd.GeoSeries(
+        [merged_metric_geometry], crs=metric_crs
+    ).to_crs(WGS84_CRS).iloc[0]
+
+    merged_record = dict(updated_record)
+    merged_record.update(
+        {
+            "geometry": merged_geometry,
+            "metric_crs": str(metric_crs),
+            "area_sq_km": float(merged_metric_geometry.area / 1_000_000),
+            "merged_with_existing": True,
+            "previous_area_sq_km": float(existing_record.get("area_sq_km", 0.0)),
+        }
+    )
+    return merged_record
+
+
 def file_signature(file_name: str, file_bytes: bytes) -> str:
     """Create a stable signature so the same upload is not reprocessed repeatedly."""
 
@@ -344,6 +377,7 @@ def build_folium_map(
     zoom: int,
     empty_label: str,
     service_area_geometry: Any | None = None,
+    fit_bounds_max_zoom: int | None = None,
 ) -> folium.Map:
     """Build a Folium map with POIs and an optional service-area polygon."""
 
@@ -402,7 +436,11 @@ def build_folium_map(
             tooltip=folium.Tooltip(f"{area_name} service area"),
         ).add_to(folium_map)
         min_x, min_y, max_x, max_y = service_area_geometry.bounds
-        folium_map.fit_bounds([[min_y, min_x], [max_y, max_x]])
+        bounds = [[min_y, min_x], [max_y, max_x]]
+        if fit_bounds_max_zoom is None:
+            folium_map.fit_bounds(bounds)
+        else:
+            folium_map.fit_bounds(bounds, max_zoom=fit_bounds_max_zoom)
 
     return folium_map
 
@@ -414,15 +452,25 @@ def render_map(
     zoom: int,
     empty_label: str,
     map_key: str,
+    service_area_geometry: Any | None = None,
+    fit_bounds_max_zoom: int | None = None,
 ) -> None:
-    """Render a Folium map with a Southeast Asia or service-area default view."""
+    """Render one combined POI and optional service-area preview with progress."""
+
+    progress = st.progress(0, text="Preparing map preview")
+    time.sleep(0.05)
+    progress.progress(35, text="Preparing POI and service-area layers")
 
     folium_map = build_folium_map(
         dataframe,
         area_name,
         zoom=zoom,
         empty_label=empty_label,
+        service_area_geometry=service_area_geometry,
+        fit_bounds_max_zoom=fit_bounds_max_zoom,
     )
+    time.sleep(0.05)
+    progress.progress(75, text="Rendering interactive map")
     st_folium(
         folium_map,
         key=map_key,
@@ -431,33 +479,7 @@ def render_map(
         use_container_width=True,
         returned_objects=[],
     )
-
-
-def render_service_area_preview(
-    dataframe: pd.DataFrame,
-    service_area_record: dict[str, Any],
-    area_name: str,
-    *,
-    map_key: str,
-) -> None:
-    """Render POIs and the derived service-area polygon together in Folium."""
-
-    geometry = service_area_record["geometry"]
-    folium_map = build_folium_map(
-        dataframe,
-        area_name,
-        zoom=10,
-        empty_label="No POIs uploaded",
-        service_area_geometry=geometry,
-    )
-    st_folium(
-        folium_map,
-        key=map_key,
-        height=470,
-        width=None,
-        use_container_width=True,
-        returned_objects=[],
-    )
+    progress.progress(100, text="Map preview ready")
 
 
 def _process_upload(uploaded_file: Any, key_prefix: str) -> tuple[pd.DataFrame | None, str | None]:
@@ -551,14 +573,49 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
     )
     dataframe, error = _process_upload(uploaded_file, key_prefix)
 
+    service_area_record: dict[str, Any] | None = None
+    service_area_error: str | None = None
+    if dataframe is not None and error is None and area_name_error is None:
+        try:
+            derived_record = derive_service_area(dataframe)
+            if key_prefix == "update_upload":
+                existing_record = st.session_state.service_area_database.get(area_name)
+                if existing_record is not None:
+                    service_area_record = merge_service_area_records(
+                        existing_record, derived_record
+                    )
+                else:
+                    service_area_record = derived_record
+            else:
+                service_area_record = derived_record
+        except (ImportError, ValueError) as exc:
+            service_area_error = str(exc)
+
     with map_container:
-        st.caption("Map preview · default view: Southeast Asia")
+        if service_area_record is None:
+            st.caption("Map preview · default view: Southeast Asia")
+        else:
+            st.caption("Map preview · uploaded POIs and derived service area")
         render_map(
             dataframe,
             area_name or selected_area,
-            zoom=DEFAULT_MAP_ZOOM,
+            zoom=(
+                DOWNLOAD_DEFAULT_MAP_ZOOM
+                if key_prefix == "update_upload"
+                else DEFAULT_MAP_ZOOM
+            ),
             empty_label="Southeast Asia preview",
             map_key=f"{key_prefix}_overview_map",
+            service_area_geometry=(
+                service_area_record["geometry"]
+                if service_area_record is not None
+                else None
+            ),
+            fit_bounds_max_zoom=(
+                DOWNLOAD_DEFAULT_MAP_ZOOM
+                if key_prefix == "update_upload"
+                else DEFAULT_MAP_ZOOM
+            ),
         )
 
     if error:
@@ -574,24 +631,19 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
         st.info("Upload a POI file to preview the locations and request a backend update.")
         return
 
-    try:
-        service_area_record = derive_service_area(dataframe)
-    except (ImportError, ValueError) as exc:
-        st.error(f"Service-area geometry could not be created: {exc}")
+    if service_area_error is not None or service_area_record is None:
+        st.error(
+            "Service-area geometry could not be created: "
+            f"{service_area_error or 'No service-area record was produced.'}"
+        )
         return
 
     st.success(f"{len(dataframe)} POI row(s) are ready for confirmation.")
     st.dataframe(dataframe, width="stretch", hide_index=True)
-    st.subheader("Derived service area")
     st.caption(
         "All uploaded POIs are joined into a convex-hull polygon and buffered by 1 km. "
-        "Cardinal extremes are retained as audit details."
-    )
-    render_service_area_preview(
-        dataframe,
-        service_area_record,
-        area_name,
-        map_key=f"{key_prefix}_service_area_map",
+        "Cardinal extremes are retained as audit details. Re-uploaded areas preserve the "
+        "previous service-area coverage by merging the old and new shapes."
     )
     st.caption(
         f"Source POI database rows: {len(dataframe)} · "
@@ -636,11 +688,14 @@ def render_update_tab() -> None:
             f"Service-area database record · {len(current_data)} POI row(s) · "
             f"{service_area_record['area_sq_km']:.2f} km²"
         )
-        render_service_area_preview(
+        render_map(
             current_data,
-            service_area_record,
             area_name,
+            zoom=DOWNLOAD_DEFAULT_MAP_ZOOM,
+            empty_label="No POIs in this service area",
             map_key="update_download_service_area_map",
+            service_area_geometry=service_area_record["geometry"],
+            fit_bounds_max_zoom=DOWNLOAD_DEFAULT_MAP_ZOOM,
         )
         st.download_button(
             "Download POI CSV",

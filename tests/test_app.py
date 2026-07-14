@@ -7,10 +7,12 @@ from shapely.geometry import Point
 
 from app import (
     CREATE_NEW_SERVICE_AREA_OPTION,
+    DOWNLOAD_DEFAULT_MAP_ZOOM,
     POI_MARKER_RADIUS_METERS,
     POI_MARKER_COLOR,
     build_folium_map,
     derive_service_area,
+    merge_service_area_records,
     normalize_poi_dataframe,
     read_poi_file,
     validate_new_service_area_name,
@@ -20,6 +22,7 @@ from app import (
 def test_create_workflow_uses_new_service_area_option_and_smaller_marker_radius() -> None:
     assert CREATE_NEW_SERVICE_AREA_OPTION == "(create new service area)"
     assert POI_MARKER_RADIUS_METERS == 37.5
+    assert DOWNLOAD_DEFAULT_MAP_ZOOM == 10
 
 
 def test_build_folium_map_contains_poi_and_service_area_layers() -> None:
@@ -38,12 +41,15 @@ def test_build_folium_map_contains_poi_and_service_area_layers() -> None:
         zoom=10,
         empty_label="No POIs",
         service_area_geometry=service_area["geometry"],
+        fit_bounds_max_zoom=DOWNLOAD_DEFAULT_MAP_ZOOM,
     )
     rendered_map = folium_map.get_root().render()
 
     assert "Test Hub" in rendered_map
     assert "Singapore service area" in rendered_map
     assert POI_MARKER_COLOR in rendered_map
+    assert '"zoom": 10,' in rendered_map
+    assert '{"maxZoom": 10}' in rendered_map
     poi_marker = next(
         child for child in folium_map._children.values() if isinstance(child, folium.Marker)
     )
@@ -170,3 +176,29 @@ def test_derive_service_area_handles_a_single_poi() -> None:
 
     assert result["geometry"].is_valid
     assert result["geometry"].area > 0
+
+
+def test_merge_service_area_records_preserves_old_and_new_coverage() -> None:
+    old_dataframe = pd.DataFrame(
+        {
+            "location_name": ["Old Hub"],
+            "latitude": [1.3000],
+            "longitude": [103.8000],
+        }
+    )
+    new_dataframe = pd.DataFrame(
+        {
+            "location_name": ["New Hub"],
+            "latitude": [1.3600],
+            "longitude": [103.9000],
+        }
+    )
+
+    old_record = derive_service_area(old_dataframe)
+    new_record = derive_service_area(new_dataframe)
+    merged_record = merge_service_area_records(old_record, new_record)
+
+    assert merged_record["merged_with_existing"] is True
+    assert merged_record["area_sq_km"] > old_record["area_sq_km"]
+    assert merged_record["geometry"].covers(Point(103.8000, 1.3000))
+    assert merged_record["geometry"].covers(Point(103.9000, 1.3600))

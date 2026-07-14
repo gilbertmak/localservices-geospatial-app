@@ -21,6 +21,10 @@ implemented as local session-state emulations.
   resulting polygon by 1,000 metres in a local metric CRS; cardinal extremes are retained as
   audit details only.
 - The update flow must provide an expanded download section and a collapsible re-upload section.
+- Each workflow must show one combined Folium preview containing the POIs and service-area shape,
+  with a visible progress bar while map layers are generated.
+- The download preview uses a named default zoom capped at level 10; re-upload previews union the
+  prior and newly derived service-area geometries before confirmation.
 - The footer must say `Created by the SWAT Mobility GIS Team`; no animation is required.
 - README must document setup, demo credentials, limitations, and validation commands.
 
@@ -40,6 +44,8 @@ implemented as local session-state emulations.
 - Demo credentials and session state must not be presented as production authentication.
 - Movable POI editing is planned separately in `movable-poi-map-plan.md`; current POIs are clickable
   top-layer markers with dragging explicitly disabled.
+- Re-upload persistence intentionally replaces the selected service area's POI rows while preserving
+  prior service-area coverage through a geometry union in the selected area's metric CRS.
 
 ## Validation contract
 

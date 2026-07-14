@@ -35,9 +35,13 @@ Demo credentials:
 3. If creating a new service area, enter a unique service-area name.
 4. Review the Southeast Asia map and upload a `.csv`, `.xlsx`, or `.xls` file.
 5. Include these required columns: `location name`, `latitude`, and `longitude`.
-6. Review the validated POIs and the derived service-area shape.
+6. Review the validated POIs and derived service-area shape together in one map preview;
+   map-generation progress is shown while the interactive map is prepared.
 7. Request synchronization to the separate simulated POI and service-area databases.
-8. In **Update POI**, use the service-area database dropdown to download the current POI snapshot or expand the re-upload workflow.
+8. In **Update POI**, use the service-area database dropdown to download the current POI
+   snapshot. Its combined map uses a default zoom capped at level 10.
+9. Expand **2 · Re-upload POI data** to replace the POI rows. The preview combines the newly
+   derived shape with the previous service-area shape so existing coverage is retained.
 
 ## Demo boundary
 
@@ -48,7 +52,8 @@ data is connected.
 For each upload, GeoPandas creates WGS84 point geometries, joins all POIs into a convex-hull polygon,
 projects it to a local UTM CRS, buffers it by 1,000 metres, and stores the resulting service-area
 geometry separately from the POI rows. The most north, east, south, and west POIs remain available
-as audit details, but no POI is excluded from the service-area hull.
+as audit details, but no POI is excluded from the service-area hull. Re-uploading an existing area
+replaces its POI rows while unioning the old and newly derived service-area geometries.
 
 The footer uses Streamlit's sticky `st.bottom` layout container.
 
