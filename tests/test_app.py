@@ -6,7 +6,10 @@ import folium
 from shapely.geometry import Point
 
 from app import (
+    CREATE_BOUNDARY_MAP_MAX_ZOOM,
     CREATE_NEW_SERVICE_AREA_OPTION,
+    DEMO_PASSWORD,
+    DEMO_USERNAME,
     DOWNLOAD_DEFAULT_MAP_ZOOM,
     POI_MARKER_RADIUS_METERS,
     POI_MARKER_COLOR,
@@ -22,7 +25,36 @@ from app import (
 def test_create_workflow_uses_new_service_area_option_and_smaller_marker_radius() -> None:
     assert CREATE_NEW_SERVICE_AREA_OPTION == "(create new service area)"
     assert POI_MARKER_RADIUS_METERS == 37.5
+    assert CREATE_BOUNDARY_MAP_MAX_ZOOM == 13
     assert DOWNLOAD_DEFAULT_MAP_ZOOM == 10
+
+
+def test_demo_credentials_match_documented_account() -> None:
+    assert DEMO_USERNAME == "demo@geospatial.com"
+    assert DEMO_PASSWORD == "geospatial-demo"
+
+
+def test_create_boundary_map_fits_to_uploaded_service_area() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "location_name": ["West Hub", "East Hub"],
+            "latitude": [1.3300, 1.3400],
+            "longitude": [103.7300, 103.7600],
+        }
+    )
+    service_area = derive_service_area(dataframe)
+
+    rendered_map = build_folium_map(
+        dataframe,
+        "Jurong East",
+        zoom=4,
+        empty_label="Southeast Asia preview",
+        service_area_geometry=service_area["geometry"],
+        fit_bounds_max_zoom=CREATE_BOUNDARY_MAP_MAX_ZOOM,
+    ).get_root().render()
+
+    assert '"zoom": 4,' in rendered_map
+    assert '{"maxZoom": 13}' in rendered_map
 
 
 def test_build_folium_map_contains_poi_and_service_area_layers() -> None:

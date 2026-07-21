@@ -25,8 +25,8 @@ The app opens with a login prompt in the sidebar.
 
 Demo credentials:
 
-- Email: `demo@swatmobility.com`
-- Password: `swat-demo`
+- Email: `demo@geospatial.com`
+- Password: `geospatial-demo`
 
 ## User flow
 
@@ -36,10 +36,12 @@ Demo credentials:
 4. Review the Southeast Asia map and upload a `.csv`, `.xlsx`, or `.xls` file.
 5. Include these required columns: `location name`, `latitude`, and `longitude`.
 6. Review the validated POIs and derived service-area shape together in one map preview;
-   map-generation progress is shown while the interactive map is prepared.
+   map-generation progress is shown while the interactive map is prepared, then the map fits
+   tightly to the derived boundary.
 7. Request synchronization to the separate simulated POI and service-area databases.
 8. In **Update POI**, use the service-area database dropdown to download the current POI
-   snapshot. Its combined map uses a default zoom capped at level 10.
+   snapshot. Its combined map uses a default zoom capped at level 10, and the selector runs in
+   a fragment so changing service areas does not rebuild the full page or disturb scroll position.
 9. Expand **2 · Re-upload POI data** to replace the POI rows. The preview combines the newly
    derived shape with the previous service-area shape so existing coverage is retained.
 
@@ -78,6 +80,7 @@ The implementation follows Streamlit's documented APIs for [sidebar widgets](htt
 [tabs](https://docs.streamlit.io/develop/api-reference/layout/st.tabs),
 [expanders](https://docs.streamlit.io/develop/api-reference/layout/st.expander),
 [status containers](https://docs.streamlit.io/develop/api-reference/status/st.status),
+[fragments](https://docs.streamlit.io/develop/api-reference/execution-flow/st.fragment),
 [download buttons](https://docs.streamlit.io/develop/api-reference/widgets/st.download_button),
 [sticky footers](https://docs.streamlit.io/develop/api-reference/layout/st.bottom), and
 [Folium maps](https://python-visualization.github.io/folium/latest/),
