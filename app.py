@@ -19,8 +19,8 @@ from shapely.ops import unary_union
 
 
 APP_TITLE = "Local Services Geospatial Update"
-DEMO_USERNAME = "demo@swatmobility.com"
-DEMO_PASSWORD = "swat-demo"
+DEMO_USERNAME = "demo@geospatial.com"
+DEMO_PASSWORD = "geospatial-demo"
 REQUIRED_COLUMNS = ("location_name", "latitude", "longitude")
 SUPPORTED_EXTENSIONS = ["csv", "xlsx", "xls"]
 WGS84_CRS = "EPSG:4326"
@@ -30,6 +30,7 @@ POI_MARKER_COLOR = "#6D28D9"
 POI_MARKER_BORDER_COLOR = "#FFFFFF"
 DEFAULT_MAP_CENTER = (7.5, 110.0)
 DEFAULT_MAP_ZOOM = 4
+CREATE_BOUNDARY_MAP_MAX_ZOOM = 13
 DOWNLOAD_DEFAULT_MAP_ZOOM = 10
 CREATE_NEW_SERVICE_AREA_OPTION = "(create new service area)"
 
@@ -316,7 +317,7 @@ def render_sidebar() -> None:
                 st.rerun()
         else:
             with st.form("login_form"):
-                username = st.text_input("Email", placeholder="demo@swatmobility.com")
+                username = st.text_input("Email", placeholder=DEMO_USERNAME)
                 password = st.text_input("Password", type="password")
                 submitted = st.form_submit_button("Log in", type="primary", width="stretch")
 
@@ -328,7 +329,10 @@ def render_sidebar() -> None:
                 else:
                     st.error("Invalid demo credentials.")
 
-            st.info("Demo account\n\nEmail: `demo@swatmobility.com`\n\nPassword: `swat-demo`")
+            st.info(
+                f"Demo account\n\nEmail: `{DEMO_USERNAME}`\n\n"
+                f"Password: `{DEMO_PASSWORD}`"
+            )
 
         st.divider()
         st.caption("Backend: local simulation")
@@ -596,14 +600,11 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
             st.caption("Map preview · default view: Southeast Asia")
         else:
             st.caption("Map preview · uploaded POIs and derived service area")
+        is_update_upload = key_prefix == "update_upload"
         render_map(
             dataframe,
             area_name or selected_area,
-            zoom=(
-                DOWNLOAD_DEFAULT_MAP_ZOOM
-                if key_prefix == "update_upload"
-                else DEFAULT_MAP_ZOOM
-            ),
+            zoom=DOWNLOAD_DEFAULT_MAP_ZOOM if is_update_upload else DEFAULT_MAP_ZOOM,
             empty_label="Southeast Asia preview",
             map_key=f"{key_prefix}_overview_map",
             service_area_geometry=(
@@ -612,9 +613,13 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
                 else None
             ),
             fit_bounds_max_zoom=(
-                DOWNLOAD_DEFAULT_MAP_ZOOM
-                if key_prefix == "update_upload"
-                else DEFAULT_MAP_ZOOM
+                None
+                if service_area_record is None
+                else (
+                    DOWNLOAD_DEFAULT_MAP_ZOOM
+                    if is_update_upload
+                    else CREATE_BOUNDARY_MAP_MAX_ZOOM
+                )
             ),
         )
 
@@ -668,6 +673,40 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
         st.caption("Status: synchronized with simulated POI and service-area databases")
 
 
+@st.fragment
+def render_update_download_workflow() -> None:
+    """Rerun only the download map so service-area changes retain page scroll."""
+
+    area_name = st.selectbox(
+        "Synced service area",
+        service_area_names(),
+        key="update_download_area",
+    )
+    current_data = st.session_state.poi_database[area_name]
+    service_area_record = st.session_state.service_area_database[area_name]
+    st.caption(
+        f"Service-area database record · {len(current_data)} POI row(s) · "
+        f"{service_area_record['area_sq_km']:.2f} km²"
+    )
+    render_map(
+        current_data,
+        area_name,
+        zoom=DOWNLOAD_DEFAULT_MAP_ZOOM,
+        empty_label="No POIs in this service area",
+        map_key="update_download_service_area_map",
+        service_area_geometry=service_area_record["geometry"],
+        fit_bounds_max_zoom=DOWNLOAD_DEFAULT_MAP_ZOOM,
+    )
+    st.download_button(
+        "Download POI CSV",
+        data=current_data.to_csv(index=False).encode("utf-8"),
+        file_name=f"{area_name.lower().replace(' ', '_')}_poi.csv",
+        mime="text/csv",
+        key="download_poi",
+        width="stretch",
+    )
+
+
 def render_update_tab() -> None:
     """Render download and re-upload controls for existing service areas."""
 
@@ -677,34 +716,7 @@ def render_update_tab() -> None:
     )
 
     with st.expander("1 · Download current POI data", expanded=True):
-        area_name = st.selectbox(
-            "Synced service area",
-            service_area_names(),
-            key="update_download_area",
-        )
-        current_data = st.session_state.poi_database[area_name]
-        service_area_record = st.session_state.service_area_database[area_name]
-        st.caption(
-            f"Service-area database record · {len(current_data)} POI row(s) · "
-            f"{service_area_record['area_sq_km']:.2f} km²"
-        )
-        render_map(
-            current_data,
-            area_name,
-            zoom=DOWNLOAD_DEFAULT_MAP_ZOOM,
-            empty_label="No POIs in this service area",
-            map_key="update_download_service_area_map",
-            service_area_geometry=service_area_record["geometry"],
-            fit_bounds_max_zoom=DOWNLOAD_DEFAULT_MAP_ZOOM,
-        )
-        st.download_button(
-            "Download POI CSV",
-            data=current_data.to_csv(index=False).encode("utf-8"),
-            file_name=f"{area_name.lower().replace(' ', '_')}_poi.csv",
-            mime="text/csv",
-            key="download_poi",
-            width="stretch",
-        )
+        render_update_download_workflow()
 
     with st.expander("2 · Re-upload POI data", expanded=False):
         render_upload_workflow("update_upload", "Replace POI records")
