@@ -8,16 +8,18 @@ from shapely.geometry import Point
 
 from app import (
     CREATE_BOUNDARY_MAP_MAX_ZOOM,
-    CREATE_NEW_SERVICE_AREA_OPTION,
     CREATE_VIEW,
     DEMO_PASSWORD,
     DEMO_USERNAME,
     DOWNLOAD_DEFAULT_MAP_ZOOM,
+    MAX_UPLOAD_SIZE_BYTES,
+    MAX_UPLOAD_SIZE_MB,
     POI_MARKER_RADIUS_METERS,
     POI_MARKER_COLOR,
     UPDATE_VIEW,
     WORKSPACE_VIEWS,
     build_folium_map,
+    display_name_from_email,
     derive_service_area,
     merge_service_area_records,
     normalize_poi_dataframe,
@@ -27,11 +29,12 @@ from app import (
 )
 
 
-def test_create_workflow_uses_new_service_area_option_and_smaller_marker_radius() -> None:
-    assert CREATE_NEW_SERVICE_AREA_OPTION == "(create new service area)"
+def test_create_workflow_uses_name_input_and_smaller_marker_radius() -> None:
     assert POI_MARKER_RADIUS_METERS == 37.5
     assert CREATE_BOUNDARY_MAP_MAX_ZOOM == 13
     assert DOWNLOAD_DEFAULT_MAP_ZOOM == 10
+    assert MAX_UPLOAD_SIZE_MB == 1
+    assert MAX_UPLOAD_SIZE_BYTES == 1_048_576
 
 
 def test_demo_credentials_match_documented_account() -> None:
@@ -43,6 +46,10 @@ def test_authenticated_workspace_uses_left_navigation_views() -> None:
     assert WORKSPACE_VIEWS == [CREATE_VIEW, UPDATE_VIEW]
     assert CREATE_VIEW == "Create new Service Area/POI"
     assert UPDATE_VIEW == "Update POI"
+
+
+def test_welcome_name_uses_email_id_without_domain() -> None:
+    assert display_name_from_email("demo@geospatial.com") == "demo"
 
 
 def test_create_boundary_map_fits_to_uploaded_service_area() -> None:
@@ -96,7 +103,7 @@ def test_build_folium_map_contains_poi_and_service_area_layers() -> None:
     poi_marker = next(
         child for child in folium_map._children.values() if isinstance(child, folium.Marker)
     )
-    assert poi_marker.options.get("draggable", False) is False
+    assert poi_marker.options.get("draggable", False) is True
     assert poi_marker.options["pane"] == "poi-pane"
 
 
