@@ -2,7 +2,7 @@
 
 These assets support the Local Services Geospatial Update case study. All locations and
 operational records are simulated. The capture harness uses the production app's GeoPandas,
-Folium, marker, buffering, and service-area merge functions so the map output remains faithful
+Folium, marker, buffering and service-area merge functions so the map output remains faithful
 to the prototype.
 
 ## Recommended article sequence
