@@ -15,10 +15,10 @@ Streamlit Community Cloud uses the root `requirements.txt` as the single depende
 following its [dependency-file precedence rules](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/app-dependencies).
 It includes GeoPandas for service-area generation and Folium/Streamlit-Folium for interactive maps.
 
-For test execution, install the development requirements instead:
+The same manifest includes the test dependency:
 
 ```bash
-python -m pip install -r requirements-dev.txt
+python -m pytest -q
 ```
 
 The app opens with a login prompt in the sidebar.
@@ -64,9 +64,6 @@ The footer uses Streamlit's sticky `st.bottom` layout container.
 The initial POI map view is centered and zoomed to Southeast Asia. POIs use a deep-violet
 (`#6D28D9`) marker with a white outline so they remain visible against OpenStreetMap's green,
 blue and pink land-use colors. POI markers open a detail popup and are intentionally non-draggable.
-
-The planned movable-POI interaction is documented in
-[`subagent decisions/movable-poi-map-plan.md`](subagent%20decisions/movable-poi-map-plan.md).
 
 ## Validation
 
