@@ -557,6 +557,8 @@ def _process_upload(uploaded_file: Any, key_prefix: str) -> tuple[pd.DataFrame |
         st.session_state[signature_key] = signature
         st.session_state[result_key] = None
         st.session_state[error_key] = None
+        st.session_state[f"{key_prefix}_submitted"] = False
+        st.session_state[f"{key_prefix}_succeeded"] = False
 
         try:
             with st.status("Processing POI file", expanded=True) as status:
@@ -621,7 +623,7 @@ def render_create_tab() -> None:
 
     service_area_record: dict[str, Any] | None = None
     service_area_error: str | None = None
-    if dataframe is not None and error is None and area_name_error is None:
+    if dataframe is not None and error is None:
         try:
             derived_record = derive_service_area(dataframe)
             service_area_record = derived_record
@@ -653,40 +655,47 @@ def render_create_tab() -> None:
         st.info("Required columns: location name, latitude, longitude.")
         return
 
-    if area_name_error:
-        st.error(area_name_error)
-        return
-
     if dataframe is None:
         st.info("Upload a POI file to preview the new service area before uploading it.")
         return
 
-    if service_area_error is not None or service_area_record is None:
-        st.error(
-            "Service-area geometry could not be created: "
-            f"{service_area_error or 'No service-area record was produced.'}"
-        )
-        return
-
     st.success(f"{len(dataframe)} POI records are ready for confirmation.")
     st.dataframe(dataframe, width="stretch", hide_index=True)
-    st.caption(
-        f"POI records: {len(dataframe)} · "
-        f"Service-area database shape: {service_area_record['area_sq_km']:.0f} km² · "
-        f"CRS used for buffer: {service_area_record['metric_crs']}"
-    )
+    if service_area_record is not None:
+        st.caption(
+            f"POI records: {len(dataframe)} · "
+            f"Service-area database shape: {service_area_record['area_sq_km']:.0f} km² · "
+            f"CRS used for buffer: {service_area_record['metric_crs']}"
+        )
+    else:
+        st.caption(f"POI records: {len(dataframe)}")
 
     if st.button(
-        "Create POIs and service area boundary",
+        "Upload POI and service area boundary",
         key="create_upload_confirm",
         type="primary",
         width="stretch",
     ):
-        _persist_to_simulated_databases(area_name, dataframe, service_area_record)
         st.session_state["create_upload_submitted"] = True
+        st.session_state["create_upload_succeeded"] = False
+        if not area_name_error and service_area_error is None and service_area_record is not None:
+            _persist_to_simulated_databases(area_name, dataframe, service_area_record)
+            st.session_state["create_upload_succeeded"] = True
 
+    if st.session_state.get("create_upload_submitted") and area_name_error:
+        st.error(area_name_error)
+    elif (
+        st.session_state.get("create_upload_submitted")
+        and (service_area_error is not None or service_area_record is None)
+    ):
+        st.error(
+            "Service-area geometry could not be created: "
+            f"{service_area_error or 'No service-area record was produced.'}"
+        )
 
-    if st.session_state.get("create_upload_submitted"):
+    if (
+        st.session_state.get("create_upload_succeeded")
+    ):
         st.success(
             f"POI and service area boundary for {area_name} successfully created."
         )
@@ -779,34 +788,47 @@ def render_update_download_workflow() -> None:
         st.info("Required columns: location name, latitude, longitude.")
         return
 
-    if service_area_error is not None or updated_service_area_record is None:
-        st.error(
-            "Service-area geometry could not be created: "
-            f"{service_area_error or 'No service-area record was produced.'}"
-        )
+    if dataframe is None:
+        st.info("Upload a POI file to preview the replacement locations.")
         return
 
     st.success(f"{len(dataframe)} POIs are ready for confirmation.")
     st.dataframe(dataframe, width="stretch", hide_index=True)
-    st.caption(
-        "All uploaded POIs are joined by a service area that is buffered by 1 km. "
-        "The previous service-area coverage is preserved when the replacement is uploaded."
-    )
+    if updated_service_area_record is not None:
+        st.caption(
+            "All uploaded POIs are joined by a service area that is buffered by 1 km. "
+            "The previous service-area coverage is preserved when the replacement is uploaded."
+        )
+    else:
+        st.caption(f"POI records: {len(dataframe)}")
     if st.button(
-        "Request upload to POI + service-area databases",
+        "Upload POI and service area boundary",
         key="update_upload_confirm",
         type="primary",
         width="stretch",
     ):
-        _persist_to_simulated_databases(
-            area_name,
-            dataframe,
-            updated_service_area_record,
-        )
         st.session_state["update_upload_submitted"] = True
-        st.success(f"POI and service area boundary for {area_name} successfully updated")
+        st.session_state["update_upload_succeeded"] = False
+        if service_area_error is None and updated_service_area_record is not None:
+            _persist_to_simulated_databases(
+                area_name,
+                dataframe,
+                updated_service_area_record,
+            )
+            st.session_state["update_upload_succeeded"] = True
 
-    if st.session_state.get("update_upload_submitted"):
+    if (
+        st.session_state.get("update_upload_submitted")
+        and (service_area_error is not None or updated_service_area_record is None)
+    ):
+        st.error(
+            "Service-area geometry could not be created: "
+            f"{service_area_error or 'No service-area record was produced.'}"
+        )
+
+    if (
+        st.session_state.get("update_upload_succeeded")
+    ):
         st.success("POI and service area successfully updated")
 
 
