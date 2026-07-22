@@ -33,6 +33,9 @@ DEFAULT_MAP_ZOOM = 4
 CREATE_BOUNDARY_MAP_MAX_ZOOM = 13
 DOWNLOAD_DEFAULT_MAP_ZOOM = 10
 CREATE_NEW_SERVICE_AREA_OPTION = "(create new service area)"
+CREATE_VIEW = "Create new Service Area/POI"
+UPDATE_VIEW = "Update POI"
+WORKSPACE_VIEWS = [CREATE_VIEW, UPDATE_VIEW]
 
 SERVICE_AREAS: dict[str, dict[str, Any]] = {
     "Singapore": {
@@ -300,21 +303,21 @@ def validate_new_service_area_name(
     return None
 
 
-def render_sidebar() -> None:
+def render_sidebar() -> str | None:
     """Render the login surface and demo connection status."""
 
     with st.sidebar:
         st.markdown("### Access portal")
-        st.caption("Authenticate to manage local-service POI updates.")
         st.divider()
 
         if st.session_state.authenticated:
-            st.success("Authenticated")
             st.caption(st.session_state.username)
             if st.button("Sign out", key="logout", width="stretch"):
                 st.session_state.authenticated = False
                 st.session_state.username = ""
                 st.rerun()
+            st.divider()
+            return st.radio("Workspace", WORKSPACE_VIEWS, key="workspace_view")
         else:
             with st.form("login_form"):
                 username = st.text_input("Email", placeholder=DEMO_USERNAME)
@@ -337,6 +340,7 @@ def render_sidebar() -> None:
         st.divider()
         st.caption("Backend: local simulation")
         st.caption("No production credentials or data are used.")
+    return None
 
 
 def add_non_draggable_poi_marker(
@@ -484,6 +488,17 @@ def render_map(
         returned_objects=[],
     )
     progress.progress(100, text="Map preview ready")
+
+
+def service_area_geojson(area_name: str, geometry: Any) -> str:
+    """Serialize one service-area boundary as a WGS84 GeoJSON FeatureCollection."""
+
+    service_area = gpd.GeoDataFrame(
+        {"service_area_name": [area_name]},
+        geometry=[geometry],
+        crs=WGS84_CRS,
+    )
+    return service_area.to_json()
 
 
 def _process_upload(uploaded_file: Any, key_prefix: str) -> tuple[pd.DataFrame | None, str | None]:
@@ -675,7 +690,7 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
 
 @st.fragment
 def render_update_download_workflow() -> None:
-    """Rerun only the download map so service-area changes retain page scroll."""
+    """Rerun only the service-area preview so selection retains page scroll."""
 
     area_name = st.selectbox(
         "Synced service area",
@@ -697,29 +712,37 @@ def render_update_download_workflow() -> None:
         service_area_geometry=service_area_record["geometry"],
         fit_bounds_max_zoom=DOWNLOAD_DEFAULT_MAP_ZOOM,
     )
-    st.download_button(
-        "Download POI CSV",
-        data=current_data.to_csv(index=False).encode("utf-8"),
-        file_name=f"{area_name.lower().replace(' ', '_')}_poi.csv",
-        mime="text/csv",
-        key="download_poi",
-        width="stretch",
-    )
+    download_columns = st.columns(2)
+    with download_columns[0]:
+        st.download_button(
+            "Download POI",
+            data=current_data.to_csv(index=False).encode("utf-8"),
+            file_name=f"{area_name.lower().replace(' ', '_')}_poi.csv",
+            mime="text/csv",
+            key="download_poi",
+            width="stretch",
+        )
+    with download_columns[1]:
+        st.download_button(
+            "Download boundary",
+            data=service_area_geojson(area_name, service_area_record["geometry"]),
+            file_name=f"{area_name.lower().replace(' ', '_')}_boundary.geojson",
+            mime="application/geo+json",
+            key="download_boundary",
+            width="stretch",
+        )
 
 
 def render_update_tab() -> None:
     """Render download and re-upload controls for existing service areas."""
 
     st.markdown(
-        "Select a service area to download its current backend snapshot, or expand the "
-        "re-upload section to submit replacement POIs."
+        "Select a service area to download its current backend snapshot then submit "
+        "replacement POIs below."
     )
 
-    with st.expander("1 · Download current POI data", expanded=True):
-        render_update_download_workflow()
-
-    with st.expander("2 · Re-upload POI data", expanded=False):
-        render_upload_workflow("update_upload", "Replace POI records")
+    render_update_download_workflow()
+    render_upload_workflow("update_upload", "Replace POI records")
 
 
 def render_footer() -> None:
@@ -755,7 +778,7 @@ def main() -> None:
         unsafe_allow_html=True,
     )
     initialize_session_state()
-    render_sidebar()
+    workspace_view = render_sidebar()
 
     if not st.session_state.authenticated:
         st.title(APP_TITLE)
@@ -764,7 +787,7 @@ def main() -> None:
         with st.container(border=True):
             st.subheader("What this demo supports")
             st.markdown(
-                "Upload a CSV or Excel file containing a location name, latitude, and "
+                "Upload a CSV or Excel file containing a location name, latitude and "
                 "longitude. Review the POIs on a Southeast Asia map, then request a "
                 "synchronization to the simulated backend."
             )
@@ -772,15 +795,15 @@ def main() -> None:
     else:
         st.title(APP_TITLE)
         st.markdown(
-            "Upload, review, and synchronize local-service points of interest across "
+            "Upload, review and synchronize local-service points of interest across "
             "the service areas managed by the GIS team."
         )
-        st.caption(f"Signed in as {st.session_state.username} · Backend: simulated")
+        st.markdown(f"### Welcome, {st.session_state.username}")
 
-        create_tab, update_tab = st.tabs(["Create new Service Area/POI", "Update POI"])
-        with create_tab:
-            render_upload_workflow("create_upload", "Create new Service Area/POI")
-        with update_tab:
+        selected_view = workspace_view
+        if selected_view == CREATE_VIEW:
+            render_upload_workflow("create_upload", CREATE_VIEW)
+        else:
             render_update_tab()
 
     render_footer()

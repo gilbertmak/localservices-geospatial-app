@@ -1,4 +1,5 @@
 from io import BytesIO
+import json
 
 import pandas as pd
 import pytest
@@ -8,16 +9,20 @@ from shapely.geometry import Point
 from app import (
     CREATE_BOUNDARY_MAP_MAX_ZOOM,
     CREATE_NEW_SERVICE_AREA_OPTION,
+    CREATE_VIEW,
     DEMO_PASSWORD,
     DEMO_USERNAME,
     DOWNLOAD_DEFAULT_MAP_ZOOM,
     POI_MARKER_RADIUS_METERS,
     POI_MARKER_COLOR,
+    UPDATE_VIEW,
+    WORKSPACE_VIEWS,
     build_folium_map,
     derive_service_area,
     merge_service_area_records,
     normalize_poi_dataframe,
     read_poi_file,
+    service_area_geojson,
     validate_new_service_area_name,
 )
 
@@ -32,6 +37,12 @@ def test_create_workflow_uses_new_service_area_option_and_smaller_marker_radius(
 def test_demo_credentials_match_documented_account() -> None:
     assert DEMO_USERNAME == "demo@geospatial.com"
     assert DEMO_PASSWORD == "geospatial-demo"
+
+
+def test_authenticated_workspace_uses_left_navigation_views() -> None:
+    assert WORKSPACE_VIEWS == [CREATE_VIEW, UPDATE_VIEW]
+    assert CREATE_VIEW == "Create new Service Area/POI"
+    assert UPDATE_VIEW == "Update POI"
 
 
 def test_create_boundary_map_fits_to_uploaded_service_area() -> None:
@@ -87,6 +98,24 @@ def test_build_folium_map_contains_poi_and_service_area_layers() -> None:
     )
     assert poi_marker.options.get("draggable", False) is False
     assert poi_marker.options["pane"] == "poi-pane"
+
+
+def test_service_area_geojson_exports_boundary_feature() -> None:
+    dataframe = pd.DataFrame(
+        {
+            "location_name": ["Singapore Hub"],
+            "latitude": [1.3521],
+            "longitude": [103.8198],
+        }
+    )
+    service_area = derive_service_area(dataframe)
+
+    payload = json.loads(service_area_geojson("Singapore", service_area["geometry"]))
+
+    assert payload["type"] == "FeatureCollection"
+    assert len(payload["features"]) == 1
+    assert payload["features"][0]["properties"]["service_area_name"] == "Singapore"
+    assert payload["features"][0]["geometry"]["type"] == "Polygon"
 
 
 def test_validate_new_service_area_name_rejects_blank_and_duplicate_names() -> None:

@@ -47,9 +47,7 @@ def load_demo_data() -> tuple[pd.DataFrame, pd.DataFrame, dict, dict]:
 def render_shell() -> None:
     with st.sidebar:
         st.markdown("### Access portal")
-        st.caption("Authenticate to manage local-service POI updates.")
         st.divider()
-        st.success("Authenticated")
         st.caption("demo@geospatial.com")
         st.button("Sign out", width="stretch", disabled=True)
         st.divider()
@@ -57,11 +55,11 @@ def render_shell() -> None:
         st.caption("No production credentials or data are used.")
 
     st.title(APP_TITLE)
+    st.markdown("### Welcome, demo@geospatial.com")
     st.markdown(
-        "Upload, review, and synchronize local-service points of interest across "
+        "Upload, review and synchronize local-service points of interest across "
         "the service areas managed by the GIS team."
     )
-    st.caption("Signed in as demo@geospatial.com · Backend: simulated")
     st.markdown(
         "<span class='demo-badge'>PRODUCT PROTOTYPE · SIMULATED PUDO DATA</span>",
         unsafe_allow_html=True,
@@ -98,7 +96,7 @@ def render_create(initial_data: pd.DataFrame, initial_area: dict) -> None:
 def render_update(initial_data: pd.DataFrame, initial_area: dict) -> None:
     st.markdown("### Update POI")
     st.caption(
-        "Select a service area to download its current backend snapshot, or expand "
+        "Select a service area to download its current backend snapshot or expand "
         "the re-upload section to submit replacement POIs."
     )
     with st.expander("1 · Download current POI data", expanded=True):
