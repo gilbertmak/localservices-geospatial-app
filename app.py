@@ -32,16 +32,18 @@ DEFAULT_MAP_CENTER = (7.5, 110.0)
 DEFAULT_MAP_ZOOM = 4
 CREATE_BOUNDARY_MAP_MAX_ZOOM = 13
 DOWNLOAD_DEFAULT_MAP_ZOOM = 10
-CREATE_NEW_SERVICE_AREA_OPTION = "(create new service area)"
+MAX_UPLOAD_SIZE_MB = 1
+MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 CREATE_VIEW = "Create new Service Area/POI"
 UPDATE_VIEW = "Update POI"
 WORKSPACE_VIEWS = [CREATE_VIEW, UPDATE_VIEW]
+WORKSPACE_QUERY_VALUES = {CREATE_VIEW: "create", UPDATE_VIEW: "update"}
 
 SERVICE_AREAS: dict[str, dict[str, Any]] = {
     "Singapore": {
         "center": (1.3521, 103.8198),
         "pois": [
-            ("SWAT Mobility HQ", 1.3009, 103.8456),
+            ("Headquarters", 1.3009, 103.8456),
             ("Marina Bay Service Hub", 1.2820, 103.8580),
             ("Jurong East Service Hub", 1.3331, 103.7423),
         ],
@@ -303,26 +305,65 @@ def validate_new_service_area_name(
     return None
 
 
+def display_name_from_email(email: str) -> str:
+    """Return the email ID used in the authenticated welcome message."""
+
+    return email.split("@", 1)[0]
+
+
+def workspace_view_from_query_params() -> str:
+    """Return the workspace selected by the page-link query parameter."""
+
+    query_value = st.query_params.get("view", WORKSPACE_QUERY_VALUES[CREATE_VIEW])
+    return next(
+        (
+            view
+            for view, value in WORKSPACE_QUERY_VALUES.items()
+            if value == query_value
+        ),
+        CREATE_VIEW,
+    )
+
+
 def render_sidebar() -> str | None:
     """Render the login surface and demo connection status."""
 
     with st.sidebar:
-        st.markdown("### Access portal")
+        st.markdown(f"## {APP_TITLE}")
         st.divider()
 
         if st.session_state.authenticated:
-            st.caption(st.session_state.username)
+            st.markdown(f"### Welcome, {display_name_from_email(st.session_state.username)}")
+            st.markdown(
+            "Upload, review and synchronize local-service points of interest across "
+            "the service areas managed by the Geospatial Team."
+            )
             if st.button("Sign out", key="logout", width="stretch"):
                 st.session_state.authenticated = False
                 st.session_state.username = ""
                 st.rerun()
             st.divider()
-            return st.radio("Workspace", WORKSPACE_VIEWS, key="workspace_view")
+            st.page_link(
+                "app.py",
+                label=CREATE_VIEW,
+                icon=":material/add_location_alt:",
+                query_params={"view": WORKSPACE_QUERY_VALUES[CREATE_VIEW]},
+                width="stretch",
+            )
+            st.page_link(
+                "app.py",
+                label=UPDATE_VIEW,
+                icon=":material/edit_location:",
+                query_params={"view": WORKSPACE_QUERY_VALUES[UPDATE_VIEW]},
+                width="stretch",
+            )
+            return workspace_view_from_query_params()
         else:
             with st.form("login_form"):
                 username = st.text_input("Email", placeholder=DEMO_USERNAME)
                 password = st.text_input("Password", type="password")
                 submitted = st.form_submit_button("Log in", type="primary", width="stretch")
+                st.caption("No production credentials or data are used.")
 
             if submitted:
                 if username == DEMO_USERNAME and password == DEMO_PASSWORD:
@@ -337,13 +378,10 @@ def render_sidebar() -> str | None:
                 f"Password: `{DEMO_PASSWORD}`"
             )
 
-        st.divider()
-        st.caption("Backend: local simulation")
-        st.caption("No production credentials or data are used.")
     return None
 
 
-def add_non_draggable_poi_marker(
+def add_draggable_poi_marker(
     folium_map: folium.Map,
     location_name: str,
     latitude: float,
@@ -374,7 +412,7 @@ def add_non_draggable_poi_marker(
         tooltip=location_name,
         pane="poi-pane",
         z_index_offset=1000,
-        draggable=False,
+        draggable=True,
     ).add_to(folium_map)
 
 
@@ -422,7 +460,7 @@ def build_folium_map(
         ).add_to(folium_map)
     else:
         for row in map_dataframe.itertuples(index=False):
-            add_non_draggable_poi_marker(
+            add_draggable_poi_marker(
                 folium_map,
                 str(row.location_name),
                 float(row.latitude),
@@ -508,6 +546,8 @@ def _process_upload(uploaded_file: Any, key_prefix: str) -> tuple[pd.DataFrame |
         return None, None
 
     file_bytes = uploaded_file.getvalue()
+    if len(file_bytes) > MAX_UPLOAD_SIZE_BYTES:
+        return None, f"File is larger than the {MAX_UPLOAD_SIZE_MB} MB upload limit."
     signature = file_signature(uploaded_file.name, file_bytes)
     signature_key = f"{key_prefix}_signature"
     result_key = f"{key_prefix}_poi"
@@ -529,7 +569,7 @@ def _process_upload(uploaded_file: Any, key_prefix: str) -> tuple[pd.DataFrame |
                 time.sleep(0.08)
                 progress.progress(100, text="POI file ready")
                 status.update(
-                    label=f"Validated {len(dataframe)} POI row(s)",
+                    label=f"Validated {len(dataframe)} POIs",
                     state="complete",
                     expanded=False,
                 )
@@ -554,74 +594,48 @@ def _persist_to_simulated_databases(
     }
 
 
-def render_upload_workflow(key_prefix: str, heading: str) -> None:
-    """Render the reusable create/re-upload POI workflow."""
+def render_create_tab() -> None:
+    """Render the new service-area workflow with a name-only input."""
 
-    st.subheader(heading)
-    area_options = service_area_names()
-    allow_new_service_area = key_prefix == "create_upload"
-    if allow_new_service_area:
-        area_options = [*area_options, CREATE_NEW_SERVICE_AREA_OPTION]
-
-    selected_area = st.selectbox(
-        "Service area",
-        area_options,
-        key=f"{key_prefix}_area",
-        help="Choose where the uploaded POI data belongs.",
+    st.markdown("## Create New Service Area")
+    area_name = st.text_input(
+        "New service area name",
+        key="create_new_area_name",
+        placeholder="e.g. Japan",
+        help="Enter a unique name for the new service area.",
+    ).strip()
+    area_name_error = validate_new_service_area_name(
+        area_name, service_area_names()
     )
-    area_name = selected_area
-    area_name_error: str | None = None
-    if allow_new_service_area and selected_area == CREATE_NEW_SERVICE_AREA_OPTION:
-        new_area_name = st.text_input(
-            "New service area name",
-            key=f"{key_prefix}_new_area_name",
-            placeholder="e.g. Punggol",
-            help="Enter a unique name for the new service area.",
-        ).strip()
-        area_name = new_area_name
-        area_name_error = validate_new_service_area_name(
-            new_area_name, service_area_names()
-        )
 
     map_container = st.container()
+    st.markdown("### Upload POI data")
     uploaded_file = st.file_uploader(
         "Upload POI data",
         type=SUPPORTED_EXTENSIONS,
-        key=f"{key_prefix}_file",
+        key="create_upload_file",
         help="Accepted formats: CSV, XLSX, XLS. Required columns: location name, latitude, longitude.",
+        label_visibility="collapsed",
     )
-    dataframe, error = _process_upload(uploaded_file, key_prefix)
+    dataframe, error = _process_upload(uploaded_file, "create_upload")
 
     service_area_record: dict[str, Any] | None = None
     service_area_error: str | None = None
     if dataframe is not None and error is None and area_name_error is None:
         try:
             derived_record = derive_service_area(dataframe)
-            if key_prefix == "update_upload":
-                existing_record = st.session_state.service_area_database.get(area_name)
-                if existing_record is not None:
-                    service_area_record = merge_service_area_records(
-                        existing_record, derived_record
-                    )
-                else:
-                    service_area_record = derived_record
-            else:
-                service_area_record = derived_record
+            service_area_record = derived_record
         except (ImportError, ValueError) as exc:
             service_area_error = str(exc)
 
     with map_container:
-        if service_area_record is None:
-            st.caption("Map preview · default view: Southeast Asia")
-        else:
-            st.caption("Map preview · uploaded POIs and derived service area")
-        is_update_upload = key_prefix == "update_upload"
+        st.markdown("### Map preview")
         render_map(
             dataframe,
-            area_name or selected_area,
-            zoom=DOWNLOAD_DEFAULT_MAP_ZOOM if is_update_upload else DEFAULT_MAP_ZOOM,
-            empty_label="Southeast Asia preview",
-            map_key=f"{key_prefix}_overview_map",
+            area_name or "New service area",
+            zoom=DEFAULT_MAP_ZOOM,
+            empty_label="Southeast Asia",
+            map_key="create_upload_overview_map",
             service_area_geometry=(
                 service_area_record["geometry"]
                 if service_area_record is not None
@@ -630,11 +644,7 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
             fit_bounds_max_zoom=(
                 None
                 if service_area_record is None
-                else (
-                    DOWNLOAD_DEFAULT_MAP_ZOOM
-                    if is_update_upload
-                    else CREATE_BOUNDARY_MAP_MAX_ZOOM
-                )
+                else CREATE_BOUNDARY_MAP_MAX_ZOOM
             ),
         )
 
@@ -648,7 +658,7 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
         return
 
     if dataframe is None:
-        st.info("Upload a POI file to preview the locations and request a backend update.")
+        st.info("Upload a POI file to preview the new service area before uploading it.")
         return
 
     if service_area_error is not None or service_area_record is None:
@@ -658,91 +668,151 @@ def render_upload_workflow(key_prefix: str, heading: str) -> None:
         )
         return
 
-    st.success(f"{len(dataframe)} POI row(s) are ready for confirmation.")
+    st.success(f"{len(dataframe)} POI records are ready for confirmation.")
     st.dataframe(dataframe, width="stretch", hide_index=True)
     st.caption(
-        "All uploaded POIs are joined into a convex-hull polygon and buffered by 1 km. "
-        "Cardinal extremes are retained as audit details. Re-uploaded areas preserve the "
-        "previous service-area coverage by merging the old and new shapes."
-    )
-    st.caption(
-        f"Source POI database rows: {len(dataframe)} · "
-        f"Service-area database shape: {service_area_record['area_sq_km']:.2f} km² · "
+        f"POI records: {len(dataframe)} · "
+        f"Service-area database shape: {service_area_record['area_sq_km']:.0f} km² · "
         f"CRS used for buffer: {service_area_record['metric_crs']}"
     )
 
     if st.button(
-        "Request upload to POI + service-area databases",
-        key=f"{key_prefix}_confirm",
+        "Create POIs and service area boundary",
+        key="create_upload_confirm",
         type="primary",
         width="stretch",
     ):
         _persist_to_simulated_databases(area_name, dataframe, service_area_record)
-        st.session_state[f"{key_prefix}_submitted"] = True
-        st.success(
-            f"Upload request accepted for {area_name}. "
-            "The POI and service-area databases are now synchronized."
-        )
+        st.session_state["create_upload_submitted"] = True
 
-    if st.session_state.get(f"{key_prefix}_submitted"):
-        st.caption("Status: synchronized with simulated POI and service-area databases")
+
+    if st.session_state.get("create_upload_submitted"):
+        st.success(
+            f"POI and service area boundary for {area_name} successfully created."
+        )
 
 
 @st.fragment
 def render_update_download_workflow() -> None:
-    """Rerun only the service-area preview so selection retains page scroll."""
+    """Render one update workflow with one selector and one replaceable map preview."""
 
+    st.markdown("## Update existing POI")
+    st.markdown("#### Select a service area")
     area_name = st.selectbox(
-        "Synced service area",
+        "Service area",
         service_area_names(),
         key="update_download_area",
+        label_visibility="collapsed",
     )
     current_data = st.session_state.poi_database[area_name]
     service_area_record = st.session_state.service_area_database[area_name]
     st.caption(
-        f"Service-area database record · {len(current_data)} POI row(s) · "
-        f"{service_area_record['area_sq_km']:.2f} km²"
+        f"{len(current_data)} POIs · "
+        f"{service_area_record['area_sq_km']:0f} km²"
     )
-    render_map(
-        current_data,
-        area_name,
-        zoom=DOWNLOAD_DEFAULT_MAP_ZOOM,
-        empty_label="No POIs in this service area",
-        map_key="update_download_service_area_map",
-        service_area_geometry=service_area_record["geometry"],
-        fit_bounds_max_zoom=DOWNLOAD_DEFAULT_MAP_ZOOM,
+
+    map_container = st.container()
+    download_container = st.container()
+    st.markdown("### Upload POI data")
+    uploaded_file = st.file_uploader(
+        "Upload POI data",
+        type=SUPPORTED_EXTENSIONS,
+        key="update_upload_file",
+        help="Accepted formats: CSV, XLSX, XLS. Maximum size: 1 MB. Required columns: location name, latitude, longitude.",
+        label_visibility="collapsed",
     )
-    download_columns = st.columns(2)
-    with download_columns[0]:
-        st.download_button(
-            "Download POI",
-            data=current_data.to_csv(index=False).encode("utf-8"),
-            file_name=f"{area_name.lower().replace(' ', '_')}_poi.csv",
-            mime="text/csv",
-            key="download_poi",
-            width="stretch",
+    dataframe, error = _process_upload(uploaded_file, "update_upload")
+
+    updated_service_area_record: dict[str, Any] | None = None
+    service_area_error: str | None = None
+    if dataframe is not None and error is None:
+        try:
+            derived_record = derive_service_area(dataframe)
+            updated_service_area_record = merge_service_area_records(
+                service_area_record,
+                derived_record,
+            )
+        except (ImportError, ValueError) as exc:
+            service_area_error = str(exc)
+
+    preview_data = dataframe if dataframe is not None and error is None else current_data
+    preview_record = (
+        updated_service_area_record
+        if updated_service_area_record is not None
+        else service_area_record
+    )
+    with map_container:
+        st.markdown("### Map preview")
+        render_map(
+            preview_data,
+            area_name,
+            zoom=DOWNLOAD_DEFAULT_MAP_ZOOM,
+            empty_label="No POIs in this service area",
+            map_key="update_download_service_area_map",
+            service_area_geometry=preview_record["geometry"],
+            fit_bounds_max_zoom=DOWNLOAD_DEFAULT_MAP_ZOOM,
         )
-    with download_columns[1]:
-        st.download_button(
-            "Download boundary",
-            data=service_area_geojson(area_name, service_area_record["geometry"]),
-            file_name=f"{area_name.lower().replace(' ', '_')}_boundary.geojson",
-            mime="application/geo+json",
-            key="download_boundary",
-            width="stretch",
+
+    with download_container:
+        download_columns = st.columns(2)
+        with download_columns[0]:
+            st.download_button(
+                "Download POI",
+                data=current_data.to_csv(index=False).encode("utf-8"),
+                file_name=f"{area_name.lower().replace(' ', '_')}_poi.csv",
+                mime="text/csv",
+                key="download_poi",
+                width="stretch",
+            )
+        with download_columns[1]:
+            st.download_button(
+                "Download boundary",
+                data=service_area_geojson(area_name, service_area_record["geometry"]),
+                file_name=f"{area_name.lower().replace(' ', '_')}_boundary.geojson",
+                mime="application/geo+json",
+                key="download_boundary",
+                width="stretch",
+            )
+
+    if error:
+        st.error(f"Upload could not be validated: {error}")
+        st.info("Required columns: location name, latitude, longitude.")
+        return
+
+    if service_area_error is not None or updated_service_area_record is None:
+        st.error(
+            "Service-area geometry could not be created: "
+            f"{service_area_error or 'No service-area record was produced.'}"
         )
+        return
+
+    st.success(f"{len(dataframe)} POIs are ready for confirmation.")
+    st.dataframe(dataframe, width="stretch", hide_index=True)
+    st.caption(
+        "All uploaded POIs are joined by a service area that is buffered by 1 km. "
+        "The previous service-area coverage is preserved when the replacement is uploaded."
+    )
+    if st.button(
+        "Request upload to POI + service-area databases",
+        key="update_upload_confirm",
+        type="primary",
+        width="stretch",
+    ):
+        _persist_to_simulated_databases(
+            area_name,
+            dataframe,
+            updated_service_area_record,
+        )
+        st.session_state["update_upload_submitted"] = True
+        st.success(f"POI and service area boundary for {area_name} successfully updated")
+
+    if st.session_state.get("update_upload_submitted"):
+        st.success("POI and service area successfully updated")
 
 
 def render_update_tab() -> None:
     """Render download and re-upload controls for existing service areas."""
-
-    st.markdown(
-        "Select a service area to download its current backend snapshot then submit "
-        "replacement POIs below."
-    )
-
     render_update_download_workflow()
-    render_upload_workflow("update_upload", "Replace POI records")
 
 
 def render_footer() -> None:
@@ -750,7 +820,7 @@ def render_footer() -> None:
 
     with st.bottom:
         st.markdown(
-            "<div class='lsge-footer'>Created by the SWAT Mobility GIS Team</div>",
+            "<div class='lsge-footer'>Created by the Geospatial Team</div>",
             unsafe_allow_html=True,
         )
 
@@ -778,31 +848,29 @@ def main() -> None:
         unsafe_allow_html=True,
     )
     initialize_session_state()
+    st.navigation(
+        [st.Page("app.py", title=APP_TITLE, url_path="workspace")],
+        position="hidden",
+    )
     workspace_view = render_sidebar()
 
     if not st.session_state.authenticated:
         st.title(APP_TITLE)
-        st.markdown("### A controlled workspace for local-service POI updates")
-        st.info("Log in from the sidebar to access the geospatial update workspace.")
+        st.markdown("### A simplified user interface for local services to update POI")
         with st.container(border=True):
             st.subheader("What this demo supports")
             st.markdown(
-                "Upload a CSV or Excel file containing a location name, latitude and "
-                "longitude. Review the POIs on a Southeast Asia map, then request a "
-                "synchronization to the simulated backend."
-            )
-            st.caption("This is a local demo. Authentication and backend writes are emulated in session state.")
+                "Upload a CSV or Excel file containing a location name, latitude and longitude. Review the POIs before uploading to the simulated backend."
+                )
+            st.caption("Authentication and backend writes are emulated in same session. If the page is refreshed, the simulated backend is reset."
+                       )
     else:
         st.title(APP_TITLE)
-        st.markdown(
-            "Upload, review and synchronize local-service points of interest across "
-            "the service areas managed by the GIS team."
-        )
-        st.markdown(f"### Welcome, {st.session_state.username}")
+        st.divider()
 
         selected_view = workspace_view
         if selected_view == CREATE_VIEW:
-            render_upload_workflow("create_upload", CREATE_VIEW)
+            render_create_tab()
         else:
             render_update_tab()
 

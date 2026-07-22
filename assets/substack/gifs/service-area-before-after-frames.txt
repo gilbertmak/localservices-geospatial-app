@@ -1,6 +1,0 @@
-file '../screenshots/05-create-review.png'
-duration 2.6
-file '../screenshots/07-reupload-merged.png'
-duration 2.8
-file '../screenshots/05-create-review.png'
-duration 2.6
